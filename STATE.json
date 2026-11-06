@@ -1,0 +1,54 @@
+{
+  "project": "OB-12 emulator",
+  "ritual": [
+    "Read this file first, then A2A.md and docs/HARDWARE.md.",
+    "Work, run the gates, commit with measurements, update this file in-file.",
+    "Reference state as STATE.json@<short-hash>."
+  ],
+  "rules": [
+    "The firmware is scripture: if it looks wrong, our reading is wrong.",
+    "Measure before patching; the compiler and the run are the judges.",
+    "Read PDFs as rendered pages with vision; OCR text is only an index.",
+    "Model the silicon, not the firmware's minimum. An unmapped register is a recorded gap.",
+    "Use absolute Windows paths with the drive colon for file tools.",
+    "Do not copy code from Prehistoricman/TMS57070: it has no licence.",
+    "Decoded firmware stays in rom/, outside git; regenerate it with the decoder."
+  ],
+  "paths": {
+    "source_material": "F:\\MIZU\\OB-12\\docs and roms",
+    "mame_reference": "F:\\MIZU\\MAME_ACCESS\\mame",
+    "unidasm": "F:\\MIZU\\MAME_ACCESS\\mame\\unidasm.exe"
+  },
+  "gates": {
+    "decode": "python tools/ob12_sysex.py \"F:/MIZU/OB-12/docs and roms/\"*.mid -o rom",
+    "decode_pass": "exit 0; every file shows size-check ok and checksums == message count",
+    "disasm_boot": "unidasm rom/boot_152-emergency-boot.bin -arch f2mc16 -basepc ffc000",
+    "vcs": "git status clean after commit"
+  },
+  "status": {
+    "phase": "workspace set up, no emulator code yet",
+    "done": [
+      "SysEx format, packing and checksum decoded for all 7 firmware files",
+      "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD"
+    ]
+  },
+  "assessment": {
+    "note": "Judgement, not measurement. Revise after each milestone.",
+    "master_boots_to_lcd": 0.9,
+    "slave_runs_dsps_loaded": 0.78,
+    "first_real_sound": 0.72,
+    "recognisable_playable": 0.68,
+    "realtime_vst3_if_sounding": 0.8,
+    "bit_exact": 0.35
+  },
+  "audit_queue": [
+    "Carve and decode the DSP microcode blocks from Slave 0x1B400-0x1D800",
+    "Master boot harness on the MAME F2MC-16 core up to the LCD",
+    "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
+    "Identify Slave reset entry and interrupt vector handling",
+    "Resolve 256 versus 512 word DMEM and CMEM from the firmware",
+    "Reverse the Slave host-bus writes to derive PLD behaviour",
+    "Decide TMS57070 core route: author permission or own implementation"
+  ],
+  "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?"
+}
