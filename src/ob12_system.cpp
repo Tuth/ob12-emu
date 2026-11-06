@@ -13,7 +13,7 @@
 //   OB12_WATCH_D=a,b count which PCs change DASP0 DMEM cells after the note, hex
 //   OB12_PHASE=0|1 start DASP4 on the even or odd half frame (default 0)
 //   OB12_NO_1FC=1    disable the 1FC divide step
-//   OB12_NOISE=1     enable the noise secondary, 0x34
+//   OB12_NO_NOISE=1  disable the noise secondary, 0x34
 //   OB12_EARLY_MODE=1  apply secondaries 28-2B before the primary, as the public emulator does
 //   OB12_POT_SWEEP=t move all pots from t seconds on
 //   OB12_FORCE_GAIN=1  old diagnostic, not needed: forces DASP4 cells C00D, C00F, C0CB
@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
     options.lock_delay = true;
     options.maclo_multiply = true;
     options.divide_1fc = getenv("OB12_NO_1FC") == nullptr;
-    options.noise_generator = getenv("OB12_NOISE") != nullptr;
+    options.noise_generator = getenv("OB12_NO_NOISE") == nullptr;
     options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
     options.compare_3e = getenv("OB12_NO_3E") == nullptr;
     options.maclo_shift = getenv("OB12_MACLO_NO_SHIFT") == nullptr;
@@ -177,6 +177,7 @@ int main(int argc, char** argv) {
     double clock = 0;
     FILE* host_log = getenv("OB12_HOST_LOG") ? fopen(getenv("OB12_HOST_LOG"), "w") : nullptr;
     FILE* port_log = getenv("OB12_PORT_LOG") ? fopen("build/ports.raw", "wb") : nullptr;
+    m->text_log = host_log;
     for (int n = 0; n < 5; n++) { host[n].log = host_log; host[n].chip = n; host[n].clock = &clock; }
     s->on_dsp_byte = [&](u8 selected, u8 data) {
         for (int chip = 0; chip < 5; chip++) if (selected & (1 << chip)) host[chip].byte(data);

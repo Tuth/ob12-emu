@@ -307,7 +307,7 @@ Silent timbre study:
 - `tools/compare_channels.py`: Slave channel 4 writes the same values as channel 0. So the
   Master plays timbre 0. Timbres 1 and 2 differ in about 30 CMEM values, for example C014,
   C04B, C087. **Retracted:** timbre 0 is not silent, see "Two-slot audio bus" below.
-- Noise hypothesis tested and rejected: enabling secondary 34 changed nothing.
+- Noise hypothesis tested and rejected: enabling secondary 34 changed nothing. Retracted, see "Panel map".
 - Voice code runs two divides of 16 steps by D04: 1F8 then 15 x 1FC, at 046 and 059.
 - 1FC with a zero divisor made idle voices output DC, so a guard treats divisor 0 as no
   subtract. This guard is a hypothesis.
@@ -591,3 +591,109 @@ Time, OscCommon Balance1. Its link to the message numbers is not established.
 
 Open: note 60 sounds at 130.8 Hz (patch or fault), what A0 07 and A0 08 are, channel 1 line at
 260 Hz, left clipping, AOUT 0.
+
+## Panel map: pot, message, label (schematics pages 34 and 38 of the PDF, measured)
+
+Labels and mux wiring are read by eye from the rendered Panel A and Panel B potentiometer
+sheets. POT n is ADC channel n, mux is POTA. Messages are measured, one pot at a time
+(`OB12_POT_STEPS`, 0.5 s apart, to C0). DSP cells are listed only where one pot was measured
+alone; an empty cell means not measured. The A8 family and the A0 family are separate lists.
+
+| ADC, mux | Label | Message | DSP cells written |
+|---|---|---|---|
+| 0, 4 | pitch wheel (by message only) | E0 | |
+| 0, 6 | mod wheel (by message only) | B0 01 | |
+| 1, 0 | LFO2 Depth | A0 47 | |
+| 1, 1 | Keyboard Time | B0 05 | |
+| 1, 2 | Osc Common Noise | A0 23 | DASP0 C12B, C128, C126 |
+| 1, 3 | LFO2 Rate | A0 4E | DASP4 C02B, C02C, C025 |
+| 1, 4 | Osc Common Ring Mod | A0 22 | DASP0 C12A, C128, C126 |
+| 1, 5 | LFO1 Fade | A0 4B | |
+| 1, 6 | Osc Common Osc2 | A0 21 | DASP0 C128, C126 |
+| 1, 7 | LFO1 Rate | A0 49 | |
+| 2, 0 | Effects Chorus | A8 17 | |
+| 2, 1 | Effects Delay | A8 1D | |
+| 2, 2 | Effects Reverb | A8 23 | |
+| 2, 3 | Effects Overdrive | A8 12 | |
+| 2, 4 | Osc 1 Wave Mix (SLID2) | A0 01 | |
+| 2, 5 | Osc Common Attack | A0 24 | |
+| 2, 6 | Osc Common Env Depth | A0 1F | |
+| 2, 7 | Osc Common Decay | A0 25 | |
+| 3, 0 | Osc 1 Wave Mix (SLID1) | A0 02 | DASP0 C0C9, C01A, C014 |
+| 3, 1 | Arpeggio Tempo | none | |
+| 3, 2 | Phrase Tempo | none | |
+| 3, 3 | Osc 1 Wave Mix (SLID0) | A0 03 | DASP0 C01A, C014 |
+| 3, 4 | Osc 1 PWM Depth | A0 0B | DASP0 C050 |
+| 3, 5 | Osc 1 Wave Ctrl | A0 04, or A0 06 | DASP0 C1B8 with 04 |
+| 3, 6 | Osc 1 LFO1 Depth | A0 08 | DASP4 C022 |
+| 3, 7 | Osc 1 FM | A0 07 | DASP0 C1C5, C057 |
+| 4, 0 | Osc2 Width | A0 14 | |
+| 4, 1 | Osc2 PWM Depth | A0 18 | |
+| 4, 2 | Osc2 Range | A0 1D | |
+| 4, 3 | Osc2 Wave Mix (SLID2) | A0 11 | |
+| 4, 4 | Osc2 Fine | A0 1E | |
+| 4, 5 | Osc2 Wave Mix (SLID1) | A0 10 | |
+| 4, 6 | Osc2 LFO1 Depth | A0 15 | |
+| 4, 7 | Osc2 Wave Mix (SLID0) | A0 0F | |
+| 5, 0-2 | open on the sheet | none | |
+| 5, 3 | Filters Resonance | A0 3F | |
+| 5, 4 | Filters Decay | A0 34 | |
+| 5, 5 | Filters Frequency | A0 3C | |
+| 5, 6 | Filters Attack | A0 33 | |
+| 5, 7 | Filters KBD Track | A0 42 | |
+| 6, 0 | Equalizer 200/Freq | A8 08 | |
+| 6, 1 | Amplifiers Decay | A0 29 | |
+| 6, 2 | Amplifiers Attack | A0 28 | |
+| 6, 3 | Equalizer 60/Low | A8 07 | |
+| 6, 4 | Filters LFO1 Depth | A0 41 | |
+| 6, 5 | Filters Sustain | A0 35 | |
+| 6, 6 | Filters Env Depth | A0 40 | |
+| 6, 7 | Filters Release | A0 36 | |
+| 7, 0 | Equalizer 2K/Q | A8 09 | |
+| 7, 1 | Equalizer 500/B-C | A8 0A | |
+| 7, 2 | Master Volume | F0 7F 30 04 01 00 v F7 | DASP4 C0CB |
+| 7, 3 | Equalizer 6K/High | A8 0B | |
+| 7, 4 | Amplifier LFO1 Depth | A0 30 | |
+| 7, 5 | Amplifiers Sustain | A0 2A | |
+| 7, 6 | Amplifier Amount | B0 07 | |
+| 7, 7 | Amplifiers Release | A0 2B | |
+
+The running status bytes were read back to their A0, A8 or B0 family from the log order.
+Pots at ADC 0 other than the wheels sent nothing and are not on these two sheets.
+
+The sheets and the measurement agree independently: the three open inputs of POT5 and the two
+tempo pots send nothing; Keyboard Time is CC 5, portamento; Amount is CC 7; Master Volume is the
+one system message. The public Cakewalk file lists 50 controllers with the same panel names; it
+gives no link to these A0 numbers.
+
+Answers to the open questions:
+- **A0 07 is Osc 1 FM.** That fits the rich periodic tone.
+- **A0 08 is Osc 1 LFO1 Depth**, a centre detent pot. So the pitch glide is probably the LFO,
+  with 40 as no depth. LFO shape and rate not measured.
+- Osc 1 Wave Ctrl sent 04 alone and 06 after other pots moved. The Master list has Saw Spread,
+  Triangle Wrap and Pulse Width, so it probably follows the wave mix. Inferred.
+- ADC channel 1 holds Ring Mod, which accounts for the 260 Hz line seen when that group moved.
+
+Mixer, measured, note 3C, one slider to FF at 13 s:
+
+| Slider | MOUT left RMS | Flatness | Autocorrelation | Note |
+|---|---|---|---|---|
+| none | 2290725 | 0.008 | 0.995 | 130.7 Hz |
+| Ring Mod | 2867160 | 0.166 | 0.991 | strongest line 261 Hz, as two equal pitches multiplied would give |
+| Osc2 | 323182 | 0.019 | 0.994 | 130 Hz |
+| Noise, secondary 34 off | 0 | - | - | silent |
+| Noise, secondary 34 on | 100440 | 0.832 | 0.069 | true noise |
+
+**Retraction.** "Noise hypothesis tested and rejected: enabling secondary 34 changed nothing"
+and the later retest were bad tests: this patch has the Noise slider at 0. Secondary 34 is the
+noise source, shown by the rows above. It is now on by default (`OB12_NO_NOISE` turns it off),
+and no unimplemented word remains in the run. Idle stays exactly 0; note 3C and the chord are
+unchanged. The bit sequence is an xorshift of mine, not the real one, and the noise level is
+unverified.
+
+Master Volume: pot 40 gives C0CB 0063C2 and RMS 319709; pots 80 and FF both give 03513E, so the
+upper half adds nothing here. Why is not known. So the left clipping on the chord happens at
+the highest volume.
+
+Tried and not useful: the Master read no name strings when pots moved, so the list at 35EAC is
+not used on the normal page. The text probe stays in `OB12_HOST_LOG`.

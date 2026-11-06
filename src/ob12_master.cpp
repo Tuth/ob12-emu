@@ -120,6 +120,17 @@ public:
         place(rom + "/presets/12prgFS.bin", 0xd0000);
     }
 
+    // Test probe: runs of printable bytes read from ascending flash addresses, for what the panel shows.
+    FILE* text_log = nullptr;
+    u32 text_next = 0, text_start = 0;
+    std::string text_run;
+    void note_text(u32 address, u8 data) {
+        if (address == text_next && data >= 0x20 && data < 0x7f) { text_run.push_back((char)data); text_next++; return; }
+        if (text_run.size() >= 4) fprintf(text_log, "%.4f T %06X %s\n", pot_clock, text_start, text_run.c_str());
+        text_run.clear();
+        if (data >= 0x20 && data < 0x7f) { text_run.push_back((char)data); text_start = address; text_next = address + 1; }
+        else text_next = 0;
+    }
     u8 read_byte(u32 address) override {
         address &= 0xffffff;
         if (address < 0x100) {
@@ -133,6 +144,7 @@ public:
                 Stat& s = touch(blank, address & 0xfff000);
                 s.reads++;
             }
+            if (text_log) note_text(address, flash[address - 0xf00000]);
             return flash[address - 0xf00000];
         }
         if (address >= 0xe00000) return ram[address & 0x3ffff];

@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "MOUT is clean with pots at 8 bit mid value: exact pitch, chord, idle 0, no forced values; pot map started",
+    "phase": "Panel pots named and mapped to messages; secondary 34 shown to be the noise source and on by default",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -57,7 +57,8 @@
       "Mode secondaries act after the primary: table stride 0x15 confirmed by firmware constants; CMEM tables no longer destroyed",
       "Primary 3E flag 8 as compare and two-step pointer secondaries: tables survive, signal passes the filter stage, pitch measured",
       "Primary 43 as unsigned low word product 24 bits down: bus flatness 0.77 to 0.06, note 48 at 261.5 Hz, chord at 131, 165, 196 Hz",
-      "A/D is read as 8 bits: pots at 80 open MOUT, clean tones without forcing; old sweep results retracted"
+      "A/D is read as 8 bits: pots at 80 open MOUT, clean tones without forcing; old sweep results retracted",
+      "Panel map from schematics plus measurement; A0 07 Osc 1 FM, A0 08 Osc 1 LFO1 Depth, Noise needs secondary 34"
     ],
     "blocked": []
   },
@@ -71,8 +72,9 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Name parameters: link A0/A8/B0 message numbers to the list at 35EAC; explain A0 07 and A0 08",
+    "Fill the DSP cell column of the panel map; explain Master Volume flat above pot 80",
     "Find why left clips on a chord and what sets the L/R ratio; find why AOUT is 0",
+    "Define the 1FC guard and the real noise sequence and level of secondary 34",
     "Find why note 60 sounds at C3, and what D0A4, D061 near Nyquist are",
     "Measure channels, timbres and pitch again after the mode fix",
     "Ask whether to offer the secondary 29 ordering finding to the TMS57070 project as a PR",
@@ -80,7 +82,6 @@
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
     "Explain secondary 0x38",
-    "Define 1FC, 0x3E flag 8, 0x43 MACLO and secondary 0x34 behaviour from the microcode",
     "Explain interrupts: 192 fired then stopped, no return path observed",
     "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
