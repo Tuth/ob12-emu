@@ -21,6 +21,7 @@ struct Options {
     bool maclo_multiply = false;     // primary 43 multiplies by the low MAC word
     bool divide_1fc = false;         // primary 1FC divides by the last ALU operand
     bool noise_generator = false;    // secondary 34 stores a noise word; real sequence unknown
+    bool late_mode_change = false;   // secondaries 28-2B act after the primary of the same word
 };
 
 class Core {

@@ -319,9 +319,9 @@ Silent timbre study:
 ## Two-slot audio bus (measured)
 
 **Retraction.** "Timbre 0 keeps D04 at 0" was an inference and it is false. Measured live on
-DASP0, D04 peaks at 00F755 for timbre 0. Reading `dmem[4]` is also wrong: D04 is cell
-`(4 + DOFF) mod (DCIRC + 1)`. Replaying `dsp_stream_N.bin` alone gave DCIRC 0 and wrong CMEM,
-so that replay is not a valid measurement; the probes now run inside `ob12_system`.
+DASP0, D04 peaks at 00F755 for timbre 0. Voice chips run with DCIRC 0 and DOFF 0, so `dmem[4]`
+was the right cell after all; only DASP4 has a ring. The replay of `dsp_stream_N.bin` lacked
+the chain inputs, so the probes now run inside `ob12_system`.
 
 What D04 is: a scratch divisor, rewritten several times per sample. In one traced sample:
 - 03D stores M1: 000061 for timbre 0, 000000 for timbre 1.
@@ -332,9 +332,8 @@ C04B is a mailbox: the host writes it, and 03A overwrites it with 00000F within 
 (`OB12_WATCH_C=4B`). The program serves one table slot at a time: 020 loads CA from ACC, 44 in
 the traced sample and 45 in the first. So the trace covers one slot only.
 
-C04A: the DSP's first pass stores 0 over the loaded 02200E, at 036, because CA is 04A then.
-Timbre 1 gets 02400E from the host later, timbre 0 does not. Holding C04A at 02200E left the
-audio identical, read back as 02200E, so this does not explain the timbre difference.
+C04A: the DSP's first pass stored 0 over the loaded 02200E, at 036. Holding that one cell left
+the audio identical. The cause was wider, see "Mode change after the primary".
 
 Bus structure, from the programs:
 - Each program has two slots, 000-0FF and 100-1FF, and each slot writes and reads the ports.
@@ -370,7 +369,8 @@ One note injected per Slave channel, hop 2, phase 0, note at 16 s, pots moving f
 | 2, 3, 6 | 0 | silent |
 
 Idle with no note: MOUT exactly 0 for 22 s. Right channel, AOUT and AX2 R stay 0; D01 and D03
-are 0 on every chip, so the voices never write the right bus.
+were 0 on every chip at this stage. Superseded: the right bus carries signal after the fix in
+"Mode change after the primary". The table above was also measured before that fix.
 
 Slot A's constant is not audio. M0 holds 000074 at 1FE and D02 holds the same value; with one
 note both are 000090. The `00021002` at 003 stores into D02 rather than clearing it.
@@ -394,24 +394,58 @@ Notes sent through the Master with `OB12_MIDI_NOTES`, 0.5 s apart, from 16 s:
 | 3C,3C; 3C,40 | silent |
 | 3C,40,43; 3C,35,2A | sound starts at 17.0 s, the third note; noise-like, flatness 0.84 |
 
-So sound needs the third voice of DASP0. It is voice slot, not time: a single note at 18.2 s
-is also silent.
+So sound needed the third voice of DASP0. It was voice slot, not time: a single note at
+18.2 s was also silent. All of this table was measured before the fix below.
 
 The three voice blocks, stride 6B from 10B, are not the same code. Slots 0 and 1 have a stage
 at 11C-12B and 187-196, using C1C9/C1CA and cells D04E-50, D05F-61. Slot 2 has none there; its
-words at 04A-062 use C1CB. The signal stops at that stage: 186 holds M0 FEDBBF, 187 reads 0.
-With one note M0 is 02C5B3 at 11B and 0 at 11C, with C1C9 = 200000. The class 2 word `9002ABC9`
-reads D04E, and D04E-50 stay 0, so the stage has no input that I can find. Slot 0 output is
-then 0 with one note, FFFFA2 with three; slot 2 gives 008991.
+words at 04A-062 use C1CB.
 
-Rejected: secondary 34 as noise, retested with one note on the fixed bus, levels unchanged.
-Its real meaning remains unknown, and it runs just before this stage in all three slots.
+**Retraction.** "The signal stops at 11C" was wrong. M0 is reloaded there, and 11D stores the
+delayed M0 in D09C, so nothing is lost at that word. The real fault was earlier, below.
+
+Secondary 34 as noise, retested with one note on the fixed bus: levels unchanged. Its real
+meaning remains unknown.
+
+## Mode change after the primary (firmware evidence, not checked on silicon)
+
+Slot 0 was silent because its parameters were destroyed. Loaded and live CMEM disagreed:
+C048 0E999B to 0, C04A 02200E to 0, C053 1D30C2 and C056 0A107F gone, C007 AC0000 to 000007.
+`OB12_WATCH_C` showed the writers were the DSP's own words in the first samples, 036, 03A, 06C,
+06F, 08D, 090, 0B8, 0BF, storing through CA.
+
+Why CA was wrong. The program keeps a tick counter in D007, 0 to 5, and walks a table per tick:
+- 01A: M1 = -(2 x tick) x C007. With C007 = AC0000 that is 1.3125 per tick.
+- 01C sets output shift 4 with secondary 29. 01D `23A92027` adds M1 to C027 = 44 and sets
+  output shift 0 with the same word.
+- 1.3125 x 16 = 21 = 0x15, exactly the stride of the voice tables C045, C05A, C06F.
+
+The core ran the secondary first, so 01D read M1 at shift 0, stepping by 1 instead of 15 hex,
+and the walk wrote over its own tables. This order came from the public emulator.
+
+Option `late_mode_change`: secondaries 28-2B act after the primary of the same word. On by
+default in `ob12_system`, off in the comparison with the public emulator. Only 29 is proven by
+this argument; 28, 2A, 2B are included by analogy.
+
+Measured with it:
+- CA base steps 44, 59, 6E. Tables survive: C045 02A00A, C048 0E999B, C04A 02200E, C000-C002.
+- Right bus carries signal for the first time: DASP4 AX2 R 258, MOUT right 391 with one note.
+- Idle stays exactly 0.
+
+Not right yet:
+- Single note 3C, no pots: voice bus reaches 8388114, full scale, within 0.2 s, then sits at
+  144. Spectrum shows 6 and 12 kHz. That is a runaway, not an envelope.
+- Single note 48, no pots: rises slowly to 5286 and stays.
+- With pots moving: one note RMS about 500 on the bus; three notes 171300, MOUT left 86933,
+  right 19, flatness 0.65. The sweep sets arbitrary parameters.
+- MOUT left and right differ by a large factor; unexplained.
 
 Open:
-- What feeds D04E-50. Candidates: secondary 34 storing to DB0, secondary 3E flag 8.
-- Timbre 0 being noise-like: the patch, or an emulation fault.
-- Whether the 196 Hz reading came from another note than 60. Direct runs may have played
-  extra notes, so note 60 has never been measured alone.
+- Why the voice runs away. First candidates: the guard on 1FC, secondary 3E flag 8, secondary
+  34, and panel start values.
+- Pitch: note 60 has still not been measured as a stable tone. 196 Hz came from direct runs,
+  which may have played other notes.
+- Channel table and timbre character must be measured again.
 
 ## Tooling and licences
 

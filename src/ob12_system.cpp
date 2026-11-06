@@ -10,9 +10,11 @@
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
 //   OB12_HOP=1|2     half frames a word takes from one chip to the next (default 2)
 //   OB12_WATCH_C=a   log the first changes of DASP0 CMEM cell a, hex, with their writer
+//   OB12_WATCH_D=a,b count which PCs change DASP0 DMEM cells after the note, hex
 //   OB12_PHASE=0|1 start DASP4 on the even or odd half frame (default 0)
 //   OB12_NO_1FC=1    disable the 1FC divide step
 //   OB12_NOISE=1     enable the noise secondary, 0x34
+//   OB12_EARLY_MODE=1  apply secondaries 28-2B before the primary, as the public emulator does
 //   OB12_POT_SWEEP=t move all pots from t seconds on
 //   OB12_FORCE_GAIN=1  diagnostic: force DASP4 output gains C00D, C00F, C0CB
 #include "emu.h"
@@ -109,7 +111,8 @@ static int32_t logical_d(const tms::Core* d, int a) {
 
 // One sample of one chip, with the machine state after each word in a PC range.
 static void voice_trace(tms::Core* d, int first, int last) {
-    for (int i = 0; i < 512; i++) {
+    int samples = getenv("OB12_TRACE_SAMPLES") ? atoi(getenv("OB12_TRACE_SAMPLES")) : 1;
+    for (int i = 0; i < 512 * samples; i++) {
         int pc = d->pc;
         uint32_t w = d->pmem[pc];
         d->step();
@@ -136,6 +139,7 @@ int main(int argc, char** argv) {
     options.maclo_multiply = true;
     options.divide_1fc = getenv("OB12_NO_1FC") == nullptr;
     options.noise_generator = getenv("OB12_NOISE") != nullptr;
+    options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
 
     auto* m = new master::Master();
     if (getenv("OB12_POT_SWEEP")) m->pot_sweep_from = atof(getenv("OB12_POT_SWEEP"));
@@ -176,6 +180,15 @@ int main(int argc, char** argv) {
     int watch = getenv("OB12_WATCH_C") ? strtol(getenv("OB12_WATCH_C"), nullptr, 16) : 0;
     int32_t watch_value = 0;
     int watch_log = getenv("OB12_WATCH_C") ? 0 : 24;
+    int start_trace = getenv("OB12_START_TRACE") ? atoi(getenv("OB12_START_TRACE")) : 0;
+    struct DWatch { int32_t last = 0, peak = 0; std::map<int, std::pair<long, int32_t>> writers; };
+    std::map<int, DWatch> watch_d;
+    if (const char* list = getenv("OB12_WATCH_D")) {  // hex, comma separated
+        for (char* p = (char*)list; *p;) {
+            watch_d[(int)strtol(p, &p, 16)];
+            if (*p == ',') p++;
+        }
+    }
     static double port_sum[5][3][2][2];  // chip, AX1-3, left/right, half frame
     long port_count[2] = {};
     try {
@@ -240,6 +253,17 @@ int main(int argc, char** argv) {
                 if (h.running) for (int i = 0; i < 256; i++) {
                     int pc = h.dsp->pc;
                     h.dsp->step();
+                    if (n == 0 && start_trace > 0 && h.programs >= 2) { start_trace--; printf("S %03X %08X A %06X %06X DA %03X %03X CA %03X %03X\n", pc, h.dsp->pmem[pc], h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->da[0], h.dsp->da[1], h.dsp->ca[0], h.dsp->ca[1]); }
+                    if (n == 0 && !watch_d.empty() && now >= note_at) for (auto& cell : watch_d) {
+                        int32_t v = h.dsp->dmem[cell.first];
+                        if (v != cell.second.last) {
+                            cell.second.last = v;
+                            auto& writer = cell.second.writers[pc];
+                            writer.first++;
+                            writer.second = v;
+                        }
+                        cell.second.peak = std::max(cell.second.peak, abs(v));
+                    }
                     if (n == 0 && h.dsp->cmem[watch] != watch_value) {
                         if (watch_log < 24) printf("C%03X dsp pc %03X word %08X %06X -> %06X at %.4f s\n", watch, pc, h.dsp->pmem[pc], watch_value & 0xffffff, h.dsp->cmem[watch] & 0xffffff, now);
                         watch_value = h.dsp->cmem[watch];
@@ -314,6 +338,11 @@ int main(int argc, char** argv) {
         for (int a = 0x48; a < 0x52; a++) printf(" %06X", d->cmem[a] & 0xffffff);
         printf("\n  D00:");
         for (int a = 0; a < 0x30; a++) printf(" %06X", logical_d(d, a) & 0xffffff);
+        puts("");
+    }
+    for (auto& cell : watch_d) {
+        printf("D%03X peak %06X writers:", cell.first, cell.second.peak);
+        for (auto& w : cell.second.writers) printf(" %03X x%ld last %06X;", w.first, w.second.first, w.second.second & 0xffffff);
         puts("");
     }
     if (const char* name = getenv("OB12_DUMP")) {  // whole DMEM by program address, and CMEM

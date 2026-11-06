@@ -664,8 +664,14 @@ void Core::step() {
         primary(word);
         post_increment(word);
     } else {
-        secondary(word);
-        primary(word);
+        uint32_t op = (word >> 16) & 0x3f;
+        if (options.late_mode_change && op >= 0x28 && op <= 0x2b) {
+            primary(word);
+            secondary(word);
+        } else {
+            secondary(word);
+            primary(word);
+        }
         post_increment(word);
     }
 
