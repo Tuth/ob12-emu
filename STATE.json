@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 build/ob12_system.exe rom 20 13 build/own.wav, then python tools/analyse_wav.py build/own.wav 11.5 12.8"
   },
   "status": {
-    "phase": "Own DSP core in place; instrument builds from this repo; output silent without noise; DASP4 gain path and Master note forwarding open",
+    "phase": "Own core runs the instrument; voices sound on the bus; DASP4 stops the signal at 0FB/0FC for lack of a coefficient",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -63,7 +63,8 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Find what opens DASP4 gain: C77 and related coefficients, trace on the own core",
+    "Sweep the Master A/D inputs so panel values reach the Slave, and watch DASP4 CMEM writes",
+    "Reverse the Slave parameter table around FCD7xx and the F0 7F 30 04 message family",
     "Implement 1FC correctly: idle voices must stay silent",
     "Find why the Master does not forward MIDI notes to the Slave",
     "Explain 196 Hz for note 60, the rising level and silent channel 0",

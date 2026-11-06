@@ -263,6 +263,24 @@ Open, in order:
   Master message not yet sent, for example panel or volume values.
 - Unimplemented and hit every sample: 1FC, 3E flag 8, secondary 34.
 
+## DASP4 gain study, `tools/dasp4_gain.cpp` (measured, own core)
+
+- With a true ring the tone reaches D08, D0A, D0D, D0E, then D12 and D16 at 0F3/0F4. At
+  0FD/0FE those are overwritten by products that carry no signal, so the coefficient behind
+  0FB/0FC (read through CA) is zero, and the signal stops there.
+- Setting all 300 zero CMEM words gives output, and a minimal set C00D, C00F, C0CB keeps it.
+  **This does not show they are gains.** Forcing them to 200000 in the full system pins MOUT
+  at full-scale DC with notes or without: an unstable feedback path, not an opened gain.
+- Control messages: `F0 7F 30 04 <param> <hi> <lo> F7` is a real Slave command family, the
+  Master sends four of them. Params 00-07 include one that writes C0CB = 03513E. No CC
+  0-119 and no param 00-1F with value 04 7F wrote C00D or C00F. Output stayed silent.
+- Slave parameter handling is table driven around FCD7xx. Not reversed yet.
+- Voice pitch re-measured in the corrected run: 196.0 Hz sawtooth, so that reading stands.
+  Note 60 should be 261.6 Hz; the patch may transpose, unknown. Level still rises while held.
+
+Next lead, untested: the Master sends panel values only on change, and the harness A/D is
+constant. Sweeping the pots should make the Master send what it normally would.
+
 ## Tooling and licences
 
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some

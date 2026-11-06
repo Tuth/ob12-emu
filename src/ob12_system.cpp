@@ -6,6 +6,7 @@
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
 //   OB12_PHASE=0|1   start DASP4 on the even or odd half frame (default 1)
 //   OB12_1FC=1       enable the 1FC divide step
+//   OB12_FORCE_GAIN=1  diagnostic: force DASP4 output gains C00D, C00F, C0CB
 #include "emu.h"
 #include "f2mc16.h"
 #include "mb90611.h"
@@ -101,6 +102,7 @@ int main(int argc, char** argv) {
     int direct = getenv("OB12_DIRECT") ? atoi(getenv("OB12_DIRECT")) : 0;
     bool midi = getenv("OB12_MIDI") != nullptr;
     int phase = getenv("OB12_PHASE") ? atoi(getenv("OB12_PHASE")) : 1;
+    bool force_gain = getenv("OB12_FORCE_GAIN") != nullptr;
 
     tms::Options options;
     options.audio_port_writes = true;
@@ -161,6 +163,8 @@ int main(int argc, char** argv) {
                     host[n].dsp->ar[1][c] = ax3[n - 1][c];
                 }
             }
+            // Diagnostic only: DASP4 output gains the firmware has not been seen to write.
+            if (force_gain) for (int index : {0x0d, 0x0f, 0xcb}) host[4].dsp->cmem[index] = 0x200000;
             for (int n = 0; n < 5; n++) {
                 Host& h = host[n];
                 if (h.start_pending && ((k + (n == 4 ? phase : 0)) & 1) == 0) { h.start_pending = false; h.running = true; }
