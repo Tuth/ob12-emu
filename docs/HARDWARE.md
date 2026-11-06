@@ -125,24 +125,28 @@ checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
 - A/D: 8-channel scan by EI2OS, 140032 transfers. Time base and reload timers all firing.
 - UART0 (LED) and UART2 (Slave) have sent 0 bytes. The display stays on the splash with an
   empty progress bar. What it waits for is not yet known; the Slave is the prime suspect.
-- Why it stalls, not yet solved. At 60M instructions all eight worker tasks are blocked, and
-  the idle task runs. Known so far:
-  - UI tasks: task 7 (F05EF3) and task 4 (F05F99) wait on message queues. Their dispatcher
-    F05FD2 and the whole F0Axxx region have never run.
-  - The Slave link driver is at F0F2D3 (send) and F0F4D8 (receive into EC5B32). The send
-    entry has never run, so the Master has not tried to talk to the Slave. UART2 RX is armed.
-  - Test: a MIDI note injected at 40M instructions is received (3 RX interrupts) but causes
-    no Slave traffic and no display change.
-  - ENIR is set to 4F, so external interrupts are in use, and the harness never raises them.
-    Sheet 02/15 wires INT0-5 to the encoder and BTIME/PTIME panel signals.
-  - Leads, untested: a Slave hello on UART2 RX, or the external panel interrupts.
-- From sheet 04/15: CS2 LED 68FF80-8F, CS3 LCD 68FF00-01 (A0 = C/D), CS4 keyboard 0000C0-CF.
+- The stall on the splash is solved. Causes, in order found:
+  - Factory timbres and programs were not loaded. They belong at flash offsets C0000 and
+    D0000, from `12tmbFS.mid` and `12prgFS.mid` in the presets zip.
+  - The firmware then formats user flash, so the 29F800 needed a command model.
+  - Upstream bug: `CALLP @RWx+disp8` pushed return address +4 for a 3-byte instruction.
+  - External interrupts were not the cause: raising them changed nothing.
+- Now, over 250M instructions, 65.6 s emulated: main screen layout drawn, UI dispatcher
+  running, 6 sector erases and 196608 words programmed, UART1 sends MIDI, and UART2 sends
+  849 bytes to the Slave. These look like MIDI: `B0 7B 00` etc., All Notes Off per channel.
+- **Task names** from RAM: PRECORD, PPLAY, PKBD, PSWITCH, PHDISPL, PADC, PPANEL, PDISPLAY,
+  PNULL. Queues: QPANEL, QKBD, QDISPLAY, QHDISPL, QRECORD, QPLAY.
+- **Font missing.** The text routine reads its table at FF0002 (F0851F). No supplied file
+  covers FF0000-FF9FFF, so screens show boxes without text. That 32 KB flash sector is
+  probably factory-resident, like the Slave boot. ob12.clearalgo.com lists nothing newer.
+- From sheet 04/15: CS2 LED- From sheet 04/15: CS2 LED 68FF80-8F, CS3 LCD 68FF00-01 (A0 = C/D), CS4 keyboard 0000C0-CF.
 - RAM at EC0000-EFFFFF is the 256 KB SRAM seen through a mirror (A18, A19 unconnected).
 
 Core changes against upstream MAME, all in `src/f2mc16`:
 - Generic effective-address decoder `ob12_ea.inc`: upstream lacks many addressing modes.
 - Added NCC, CMR, CALLV, MOVX A,dir, MOVX A,io, XCH Ri,ea, MOVW @AL,AH and ALU forms.
 - Bug fixed: interrupt level narrowed to 8 bits, clearing ILM and RP in PS on every interrupt.
+- Bug fixed: `CALLP @RWx+disp8` return address.
 
 ## Tooling and licences
 

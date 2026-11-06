@@ -2993,7 +2993,7 @@ void f2mc16_device::opcodes_ea71(u8 operand)
 		// CALLP @RWx + disp8
 		case 0x30: case 0x31: case 0x32: case 0x33: case 0x34: case 0x35: case 0x36: case 0x37:
 			push_16(m_pcb);
-			push_16(m_pc + 4);
+			push_16(m_pc + 3); // OB-12: upstream pushed +4, but the instruction is 3 bytes
 			m_tmp8 = read_8((m_pcb << 16) | (m_pc + 2));
 			m_tmp16 = read_rwX(operand & 7) + s8(m_tmp8);
 			m_tmpea = getRWbank(operand & 7, m_tmp16);

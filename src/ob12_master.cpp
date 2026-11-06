@@ -166,6 +166,8 @@ public:
         place(rom + "/12cpu152-CPU-v1.52-FINAL.bin", 0x00000);
         place(rom + "/system-parameters.bin", 0xfa000);
         place(rom + "/boot_152-emergency-boot.bin", 0xfc000);
+        place(rom + "/presets/12tmbFS.bin", 0xc0000);
+        place(rom + "/presets/12prgFS.bin", 0xd0000);
     }
 
     u8 read_byte(u32 address) override {
@@ -176,7 +178,13 @@ public:
             return io_read(address);
         }
         if (address < 0x500) return internal[address];
-        if (address >= 0xf00000) return flash[address - 0xf00000];
+        if (address >= 0xf00000) {
+            if (flash[address - 0xf00000] == 0xff && address >= 0xf54000 && address < 0xffc000) {
+                Stat& s = touch(blank, address & 0xfff000);
+                s.reads++;
+            }
+            return flash[address - 0xf00000];
+        }
         if (address >= 0xe00000) return ram[address & 0x3ffff];
         if (address == 0x68ff00) return lcd.read_data();
         if (address == 0x68ff01) return lcd.status();
@@ -194,7 +202,7 @@ public:
             return;
         }
         if (address < 0x500) { internal[address] = data; return; }
-        if (address >= 0xf00000) { Stat& s = touch(flashw, address & 0xffff00); s.writes++; s.last = data; return; }
+        if (address >= 0xf00000) { Stat& s = touch(flashw, address & 0xff0000); s.writes++; s.last = data; flash_write(address - 0xf00000, data); return; }
         if (address >= 0xe00000) {
             u32 cell = address & 0x3ffff;
             if (watch_from && steps > watch_from && cell >= watch_lo && cell < watch_hi && watch_log.size() < 24) {
@@ -221,6 +229,7 @@ public:
         timebase += cycles;
         s64 interval = (s64)4 << shift[io[0xa9] & 3];
         if (timebase >= interval) { timebase -= interval; io[0xa9] |= 0x08; }
+        if (int_period && (int_timer -= cycles) <= 0) { int_timer = int_period; io[0x29] |= int_mask; }
         if (adc_busy > 0 && (adc_busy -= cycles) <= 0) {
             adc_busy = 0;
             io[0x2d] |= 0x40;  // INT
@@ -234,6 +243,9 @@ public:
 
     // Test input: queue bytes on the MIDI input.
     void midi_in(const std::vector<u8>& bytes) { uart[1].rx_queue.insert(uart[1].rx_queue.end(), bytes.begin(), bytes.end()); }
+    // Test input: raise external interrupts periodically.
+    int int_period = 0, int_timer = 0;
+    u8 int_mask = 0;
     long watch_from = 0;
     u32 watch_lo = 0, watch_hi = 0;
     std::vector<std::string> watch_log;
@@ -243,6 +255,10 @@ public:
     T6963 lcd;
 
     // Execution count of every PC, for offline coverage analysis.
+    void save_ram(const std::string& path) {
+        std::ofstream file(path, std::ios::binary);
+        file.write((const char*)ram.data(), ram.size());
+    }
     void save_hot(const std::string& path) {
         std::map<u32, long> sorted(hot.begin(), hot.end());
         std::ofstream file(path);
@@ -293,6 +309,10 @@ public:
         puts("external (16-byte block reads writes last firstPC):");
         for (auto& entry : ext)
             printf("  %06X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
+        puts("reads of blank flash (4 KB block reads firstPC):");
+        for (auto& entry : blank)
+            printf("  %06X r%ld pc %06X\n", entry.first, entry.second.reads, entry.second.first_pc);
+        printf("flash: %ld sector erases, %ld words programmed\n", flash_erases, flash_programs);
         puts("flash writes:");
         for (auto& entry : flashw)
             printf("  %06X w%ld last %02X pc %06X\n", entry.first, entry.second.writes, entry.second.last, entry.second.first_pc);
@@ -365,6 +385,11 @@ private:
             if (u.rx_vector == vector) return u.rx_pending();
         }
         if (vector == 0x22) return (io[0xa9] & 0x18) == 0x18;  // time base
+        // External interrupts INT0-7: vectors 0B, 0D ... 19, enabled by ENIR, latched in EIRR.
+        if (vector >= 0x0b && vector <= 0x19 && (vector & 1)) {
+            u8 bit = 1 << ((vector - 0x0b) / 2);
+            return io[0x28] & io[0x29] & bit;
+        }
         if (vector == 0x1f) return (io[0x2d] & 0x60) == 0x60;  // A/D
         return false;
     }
@@ -402,6 +427,7 @@ private:
             if (address == (u32)u.base + 2) return u.read();
             if (address == (u32)u.base + 3) return u.ssr;
         }
+        if (address == 0x29 && rmw()) return 0xff;  // EIRR: bit operations must not clear other flags
         if (address >= 0xc0 && address <= 0xcf) return 0xff;  // keyboard, sheet 04/15, no keys down
         if (address == 0x2e) return 0x00;  // A/D result, mid scale
         if (address == 0x2f) return 0x02;
@@ -426,6 +452,9 @@ private:
             if (address == (u32)u.base + 3) { u.ssr = (u.ssr & 0xfc) | (data & 3); return; }
         }
         switch (address) {
+        case 0x29:  // EIRR: writing 0 clears a request.
+            io[address] &= data;
+            break;
         case 0xa1:  // CKSCR: MCM follows MCS once the clock has switched.
             io[address] = (data & 0xbf) | (data & 0x04 ? 0x40 : 0);
             break;
@@ -443,6 +472,46 @@ private:
             break;
         default:
             io[address] = data;
+            break;
+        }
+    }
+
+    // 29F800T in word mode, sheet 03/15. Commands complete at once, so status polls see done.
+    // Word address 5555/2AAA appear as byte address AAAA/5554 because A0 is unconnected.
+    void flash_write(u32 offset, u8 data) {
+        if (flash_high) {  // second byte of a word program
+            flash_high = false;
+            flash[offset] &= data;
+            flash_state = 0;
+            return;
+        }
+        if (offset & 1) return;  // high byte of a command word
+        u32 low = offset & 0xffff;
+        if (data == 0xf0) { flash_state = 0; return; }
+        switch (flash_state) {
+        case 0: case 3: flash_state = (low == 0xaaaa && data == 0xaa) ? flash_state + 1 : 0; break;
+        case 1: case 4: flash_state = (low == 0x5554 && data == 0x55) ? flash_state + 1 : 0; break;
+        case 2:
+            if (data == 0xa0) flash_state = 6;
+            else if (data == 0x80) flash_state = 3;
+            else flash_state = 0;
+            break;
+        case 5:
+            if (data == 0x30) {
+                u32 start = offset & 0xf0000, size = 0x10000;
+                if (offset >= 0xfc000) { start = 0xfc000; size = 0x4000; }
+                else if (offset >= 0xfa000) { start = 0xfa000; size = 0x2000; }
+                else if (offset >= 0xf8000) { start = 0xf8000; size = 0x2000; }
+                else if (offset >= 0xf0000) { start = 0xf0000; size = 0x8000; }
+                std::fill(flash.begin() + start, flash.begin() + start + size, 0xff);
+                flash_erases++;
+            }
+            flash_state = 0;
+            break;
+        case 6:
+            flash[offset] &= data;
+            flash_programs++;
+            flash_high = true;
             break;
         }
     }
@@ -466,6 +535,9 @@ private:
     Uart uart[3];
     s64 timebase = 0;
     int adc_busy = 0, adc_channel = 0;
+    int flash_state = 0;
+    bool flash_high = false;
+    long flash_erases = 0, flash_programs = 0;
     u8 ics[16] = {};
     std::map<int, long> ei2os_count;
     std::vector<std::string> switches, jumps;
@@ -474,7 +546,7 @@ private:
     u32 trail[16] = {};
     int trail_at = 0;
     std::unordered_map<u32, long> hot;
-    std::map<u32, Stat> iostat, ext, flashw;
+    std::map<u32, Stat> iostat, ext, flashw, blank;
     std::map<int, long> vectors;
 };
 
@@ -487,6 +559,10 @@ int main(int argc, char** argv) {
         cpu->watch_from = atol(argv[4]);
         cpu->watch_lo = strtoul(argv[5], nullptr, 16) & 0x3ffff;
         cpu->watch_hi = strtoul(argv[6], nullptr, 16) & 0x3ffff;
+    }
+    if (getenv("OB12_INT_MASK")) {
+        cpu->int_mask = strtoul(getenv("OB12_INT_MASK"), nullptr, 16);
+        cpu->int_period = getenv("OB12_INT_PERIOD") ? atoi(getenv("OB12_INT_PERIOD")) : 80000;
     }
     cpu->attach(cpu);
     cpu->reset();
@@ -504,5 +580,6 @@ int main(int argc, char** argv) {
     cpu->report();
     if (argc > 3) cpu->lcd.save_pbm(argv[3]);
     cpu->save_hot("build/hot.txt");
+    cpu->save_ram("build/ram.bin");
     return 0;
 }

@@ -28,10 +28,11 @@
     "carve_pass": "exit 0; all 10 table entries OK",
     "build_master": "tools/build_master.bat",
     "run_master": "build/ob12_master.exe rom 300000000 build/lcd.pbm",
-    "run_master_pass": "no STOP line; UART1 shows FE bytes; LCD writes 35127 or more"
+    "run_master_pass": "no STOP line; UART2 sends bytes; flash shows sector erases; LCD writes 37381 or more",
+    "presets": "extract the presets zip to rom/presets_mid, then python tools/ob12_sysex.py rom/presets_mid/*.mid -o rom/presets"
   },
   "status": {
-    "phase": "Master stable but stalled on the splash: all worker tasks blocked on queues, UI dispatcher never run",
+    "phase": "Master reaches the main screen and talks to the Slave; text missing because the font sector is absent",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -39,7 +40,8 @@
       "Ran programs 0, 1, 4 for 48000 samples: 512/512 words visited, 0 PC discontinuities",
       "Audio output path: 0x0C/0D/0E flag 4 writes AX1/2/3; AX3 pass-through 100% bit-exact on programs 0 and 1",
       "Chain test: summing bus and LFO bus reach DASP4 inputs bit-exact",
-      "Master boot on vendored F2MC-16 core: 300M instructions, 9-task RTOS, splash on LCD, FE every 300 ms"
+      "Master boot on vendored F2MC-16 core: 300M instructions, 9-task RTOS, splash on LCD, FE every 300 ms",
+      "Master main screen and 849 bytes to the Slave after loading presets, 29F800 model, CALLP fix"
     ],
     "blocked": []
   },
@@ -53,8 +55,8 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Model external interrupts INT0-5 (encoder, BTIME, PTIME) and see whether the UI starts",
-    "If not, derive the Slave hello from the UART2 receive parser and inject it",
+    "Build the Slave harness: receive the Master stream on UART2 and load the DSPs",
+    "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
     "Explain secondary 0x38",
     "Define 1FC, 0x3E flag 8, 0x43 MACLO and secondary 0x34 behaviour from the microcode",
