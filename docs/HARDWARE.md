@@ -125,6 +125,17 @@ checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
 - A/D: 8-channel scan by EI2OS, 140032 transfers. Time base and reload timers all firing.
 - UART0 (LED) and UART2 (Slave) have sent 0 bytes. The display stays on the splash with an
   empty progress bar. What it waits for is not yet known; the Slave is the prime suspect.
+- Why it stalls, not yet solved. At 60M instructions all eight worker tasks are blocked, and
+  the idle task runs. Known so far:
+  - UI tasks: task 7 (F05EF3) and task 4 (F05F99) wait on message queues. Their dispatcher
+    F05FD2 and the whole F0Axxx region have never run.
+  - The Slave link driver is at F0F2D3 (send) and F0F4D8 (receive into EC5B32). The send
+    entry has never run, so the Master has not tried to talk to the Slave. UART2 RX is armed.
+  - Test: a MIDI note injected at 40M instructions is received (3 RX interrupts) but causes
+    no Slave traffic and no display change.
+  - ENIR is set to 4F, so external interrupts are in use, and the harness never raises them.
+    Sheet 02/15 wires INT0-5 to the encoder and BTIME/PTIME panel signals.
+  - Leads, untested: a Slave hello on UART2 RX, or the external panel interrupts.
 - From sheet 04/15: CS2 LED 68FF80-8F, CS3 LCD 68FF00-01 (A0 = C/D), CS4 keyboard 0000C0-CF.
 - RAM at EC0000-EFFFFF is the 256 KB SRAM seen through a mirror (A18, A19 unconnected).
 

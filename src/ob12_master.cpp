@@ -121,12 +121,21 @@ struct Uart {
     int base = 0, tx_vector = 0, rx_vector = 0;
     const char* name = "";
     u8 scr = 0, smr = 0, ssr = 0x08;  // TDRE set
-    int tx_timer = 0;
+    int tx_timer = 0, rx_timer = 0;
     long sent = 0;
+    u8 rx_data = 0;
+    std::vector<u8> rx_queue;
     std::vector<u8> head;
     void advance(int cycles) {
         if (tx_timer > 0 && (tx_timer -= cycles) <= 0) { tx_timer = 0; ssr |= 0x08; }
+        if (!rx_queue.empty() && (rx_timer -= cycles) <= 0 && !(ssr & 0x10)) {
+            rx_data = rx_queue.front();
+            rx_queue.erase(rx_queue.begin());
+            ssr |= 0x10;  // RDRF
+            rx_timer = 5120;  // one MIDI byte at 31250 baud
+        }
     }
+    u8 read() { ssr &= ~0x10; return rx_data; }
     void write(u8 data) {
         sent++;
         if (head.size() < 48) head.push_back(data);
@@ -223,6 +232,8 @@ public:
         update_irq();
     }
 
+    // Test input: queue bytes on the MIDI input.
+    void midi_in(const std::vector<u8>& bytes) { uart[1].rx_queue.insert(uart[1].rx_queue.end(), bytes.begin(), bytes.end()); }
     long watch_from = 0;
     u32 watch_lo = 0, watch_hi = 0;
     std::vector<std::string> watch_log;
@@ -230,6 +241,13 @@ public:
     s64 cycles_total = 0;
     long irqs_taken = 0;
     T6963 lcd;
+
+    // Execution count of every PC, for offline coverage analysis.
+    void save_hot(const std::string& path) {
+        std::map<u32, long> sorted(hot.begin(), hot.end());
+        std::ofstream file(path);
+        for (auto& entry : sorted) file << std::hex << entry.first << ' ' << std::dec << entry.second << '\n';
+    }
 
     void report() {
         printf("instructions %ld, cycles %lld (%.2f s), interrupts %ld, last PC %06X\n", steps, cycles_total, cycles_total / 16e6, irqs_taken, pc);
@@ -244,6 +262,21 @@ public:
         for (auto& line : switches) puts(line.c_str());
         for (auto& line : watch_log) puts(line.c_str());
         for (auto& line : jumps) puts(line.c_str());
+        // RTOS view: TCB table at EC0E6E, 8 bytes per task, first word is the saved SP.
+        printf("RTOS current %02X ready %04X %04X\n", read_word(0xec0e5e), read_word(0xec0e6a), read_word(0xec0e6c));
+        for (int task = 0; task < 9; task++) {
+            u32 tcb = 0xec0e6e + task * 8;
+            u16 sp = read_word(tcb);
+            printf("task %d tcb", task);
+            for (int i = 0; i < 8; i += 2) printf(" %04X", read_word(tcb + i));
+            printf(" sp %04X code addresses on stack:", sp);
+            int shown = 0;
+            for (u32 at = sp; at < (u32)sp + 0x60 && shown < 12; at += 2) {
+                u32 low = read_word(0xec0000 | at), high = read_word(0xec0000 | (at + 2)) & 0xff;
+                if (high >= 0xf0 && high <= 0xf5) { printf(" %02X%04X", high, low); shown++; }
+            }
+            puts("");
+        }
         lcd.report();
         for (auto& u : uart) {
             printf("%s: %ld bytes:", u.name, u.sent);
@@ -366,7 +399,7 @@ private:
         for (auto& u : uart) {
             if (address == (u32)u.base) return u.smr;
             if (address == (u32)u.base + 1) return u.scr;
-            if (address == (u32)u.base + 2) return 0;
+            if (address == (u32)u.base + 2) return u.read();
             if (address == (u32)u.base + 3) return u.ssr;
         }
         if (address >= 0xc0 && address <= 0xcf) return 0xff;  // keyboard, sheet 04/15, no keys down
@@ -458,7 +491,9 @@ int main(int argc, char** argv) {
     cpu->attach(cpu);
     cpu->reset();
     try {
+        long midi_at = getenv("OB12_MIDI_AT") ? atol(getenv("OB12_MIDI_AT")) : 0;
         while (cpu->steps < limit) {
+            if (midi_at && cpu->steps >= midi_at) { cpu->midi_in({0x90, 0x3c, 0x64}); midi_at = 0; }
             const int slice = 200;
             cpu->run(slice);
             cpu->tick(slice - cpu->cycles_left());
@@ -468,5 +503,6 @@ int main(int argc, char** argv) {
     }
     cpu->report();
     if (argc > 3) cpu->lcd.save_pbm(argv[3]);
+    cpu->save_hot("build/hot.txt");
     return 0;
 }
