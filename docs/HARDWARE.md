@@ -31,17 +31,43 @@ Each line says where it came from. Schematic pages are the service manual's own
 - Slave image (`12dsp111`, section `[SoftSlave]`) is F2MC-16 code based at FC0000,
   not DSP code: string pointer FC00E0 hits "ERROR: interrupt IsrNull !!!".
 
+## Settled (DSP microcode, carved by `tools/ob12_carve.py`)
+
+The Slave holds parallel 10-entry tables at FC2340. All entries pass the layout
+checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
+
+| Entry | PMEM | Words | CMEM | Words |
+|---|---|---|---|---|
+| 0 | FDB324 | 512 | FDBB24 | 487 |
+| 1-3 (one shared block) | FDC0E6 | 512 | FDC8E6 | 487 |
+| 4 | FDCEA8 | 512 | FDD6A8 | 313 |
+| 5-8 (one shared block) | FDDD12 | 22 | FDDD6A | 3 |
+| 9 | FCCFE8 | 10 | FCD010 | 1 |
+
+- PMEM words are stored little-endian, CMEM words big-endian.
+- Programs 0 and 1 differ in only 9 of 512 words.
+- CMEM holds at least 487 words, so the wiki's 256-word CMEM cannot apply here.
+- Static check (`tools/ob12_dsp_check.py`): primary opcodes 100% known in all programs,
+  secondary 99.3-100%. Control on Slave CPU code: secondary 59.4%, jumps 0/23 in range.
+- The three 512-word programs contain no 0xFx jump words at all.
+- Secondary opcode 0x34 is absent from the public emulator's secondary switch, used by
+  `6C341AB0` (programs 0, 1 at 11B, 186, 1F1) and `53F410D2` (program 4 at 01A, 048).
+  The public IDA module does have an 0x34 branch.
+
 ## Open, not yet facts
 
-- **DSP microcode location.** Slave 0x1B400-0x1D800 shows 4-byte and 3-byte periodic
-  blocks. Frequent word top bytes 0x42 and 0x6C are multiply and MAC opcodes in the
-  public emulator. Exact block bounds and count are not established.
+- **Microcode never executed.** Everything above is static. Running it is the next proof.
+- **Straight-line hypothesis.** No jumps plus 512 cycles per sample suggests PC simply
+  wraps once per sample. Would be falsified by a jump form we do not recognise.
+- **Entry assignment hypothesis.** Entries 0-4 = DASP0-4 in normal use; 5-9 = short
+  programs for the same chips, perhaps the Master's PROBEDASP tests. Needs the loader code.
+- **12-byte header meaning.** `3C F3 CF B9 01 00 FC FF 00 03 00 00` varies slightly per
+  program (byte 3, byte 9). Possibly control register values.
 - **Slave boot block missing.** 167 of 1754 plausible CALLP targets land above the
   image, on 4 addresses: FFD3A0 (161 calls), FFD215, FFD12E, FFD1BD. The reset vector
   is also absent. `boot_152` at those offsets does not look like function entries.
   No supplied file contains this code.
-- **Memory size conflict.** Project wiki says 256-word data and coefficient memory; the
-  public emulator declares 512. Settle against the firmware.
+- **DMEM size.** Wiki says 256 words, public emulator declares 512. Settle from microcode.
 - **PLD behaviour** must be inferred from Slave code and the schematic.
 - **Master to Slave link** runs over MSCK, MTX, STX; protocol unknown.
 

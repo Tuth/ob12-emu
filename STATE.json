@@ -23,13 +23,19 @@
     "decode": "python tools/ob12_sysex.py \"F:/MIZU/OB-12/docs and roms/\"*.mid -o rom",
     "decode_pass": "exit 0; every file shows size-check ok and checksums == message count",
     "disasm_boot": "unidasm rom/boot_152-emergency-boot.bin -arch f2mc16 -basepc ffc000",
-    "vcs": "git status clean after commit"
+    "vcs": "git status clean after commit",
+    "carve": "python tools/ob12_carve.py rom/12dsp111-DSP-v1.11-FINAL.bin -o rom/dsp",
+    "carve_pass": "exit 0; all 10 table entries OK"
   },
   "status": {
-    "phase": "workspace set up, no emulator code yet",
+    "phase": "DSP microcode carved and statically validated; nothing executed yet",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
-      "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD"
+      "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
+      "Carved 5 distinct TMS57070 programs from the Slave table at FC2340; opcodes 99.3-100% known against a 59.4% control"
+    ],
+    "blocked": [
+      "Compiling and running the downloaded TMS57070 emulator was denied by the permission system; decide route with Thor"
     ]
   },
   "assessment": {
@@ -42,11 +48,12 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Carve and decode the DSP microcode blocks from Slave 0x1B400-0x1D800",
+    "Execute the microcode: own core, or run the public emulator locally if Thor allows it",
+    "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
+    "Implement secondary opcode 0x34 and settle DMEM size from microcode addressing",
     "Master boot harness on the MAME F2MC-16 core up to the LCD",
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
     "Identify Slave reset entry and interrupt vector handling",
-    "Resolve 256 versus 512 word DMEM and CMEM from the firmware",
     "Reverse the Slave host-bus writes to derive PLD behaviour",
     "Decide TMS57070 core route: author permission or own implementation"
   ],
