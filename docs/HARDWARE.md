@@ -700,6 +700,8 @@ not used on the normal page. The text probe stays in `OB12_HOST_LOG`.
 
 ## AOUT and clipping (measured)
 
+The clipping part is superseded by "Slave PPG tick": it was measured without envelope stages.
+
 **Retraction.** "Pots 80 and FF both give 03513E, so the upper half adds nothing" was wrong. At
 rest the pot never moved, so no volume message was sent and C0CB kept its start-up value. The
 Master Volume curve, chord 3C, 40, 43, pot moved in steps:
@@ -747,3 +749,73 @@ retriggering the note gave none either, but that run lost all sound from byte 20
 
 Probes added: `OB12_SLAVE_SEQ`, `OB12_SLAVE_FILE`, `OB12_AUX_TONE`, `OB12_AOUT_CELLS`,
 `OB12_CELL_WRITERS`.
+
+## Slave PPG tick: voices stopped after 12 notes (measured)
+
+Found while searching for the BUS message. With note-offs, 20 repeated notes gave sound for 12
+notes only, then silence for good. The cause was not the note-off: the Slave went back to idle
+and its voice table stayed in state 08.
+
+What was missing. FC0300, an open question for a long time, is a PPG interrupt:
+- It clears I:30 bit 3 and I:31 bit 3. The datasheet gives 30, 31 as PPGC0, PPGC1, and bit 3 as
+  PUF, the underflow flag.
+- The firmware masks it by writing 7, then 6, to I:B8. That is ICR08, shared by PPG #0 (vector
+  1B) and PPG #1 (vector 1C).
+- The firmware never programs the PPG. The resident boot we do not have must do that, as it
+  does for the UART. So in the harness the interrupt never ran.
+
+What it does, from the disassembly (`unidasm -arch f2mc16`): a timing wheel of 256 slots at 7A9E
+with the position in 7B9E. FC43D7 schedules timer n with a delay in ticks; when one expires the
+ISR clears 79DE[n] and sets CB3C, and FC3D34 in the main loop then advances voices. Voice state
+is at 8A6C, stride 22, 12 voices: 01 playing, 08 released, 00 free.
+
+Modelled: vector 1B to FC0300, ICR08 = 6, PIE0 set, a tick from sample time, `OB12_SLAVE_TICK`.
+
+**The tick rate is inferred, not measured.** Default 1 ms. Evidence: one delay at note-on is
+24999 ticks, next to a round 25000. With 1 ms the amp envelope stage change lands 0.83 s after
+the note, and without the tick the level keeps rising for roughly 1.0-1.2 s, so a true rate
+may differ somewhat. Envelope times depend on this value.
+
+Measured with the tick, pots at 80:
+
+| Input | Result |
+|---|---|
+| Idle | exactly 0 |
+| 20 notes, note-off each | every note sounds, voices are reused |
+| Note 3C | 130.7 Hz, flatness 0.005, autocorrelation 0.995 |
+| Note 48 | 261.4 Hz, flatness 0.003 |
+| Chord 3C, 40, 43 | 131, 165, 196 Hz, flatness 0.006 left and right, no clipped samples, peak 8068192 |
+
+**Retraction.** The chord clipping in "AOUT and clipping" was measured without envelope stages:
+amp stayed in its attack ramp. With the tick the chord no longer clips at start-up volume.
+The volume table there also predates the tick.
+
+Host writes now follow the envelope: at note-on C132 000129, C134 8000E8; at the stage change
+C132 000013, C134 800014; at note-off C132 000000, C134 80011C. Meaning inferred, not traced.
+
+The CPU clock in the harness runs about 4% ahead of sample time: a note sent at 13.00 s shows
+13.52 s on `cycles_total`. Not fixed. The tick and pots use sample time.
+
+## BUS search (measured, not solved)
+
+Still not found. Tested with the tick on, retriggered notes, AOUT stayed 0 throughout:
+- Each byte of `F0 7E 04` set to 0, 1, 2, 3, 4, 5, sound kept. Bytes 42-44 at 1 raise the level.
+- `A8` n v for all n, v = 1, 2, 4, 5; for n 40-7F, v = 0B, 0F, 17, 18, 40, 7F.
+- No host write ever touched C07F or C080.
+
+A new fact: `A8 49 v` writes DASP4 C07D, the MOUT left pointer, with v itself, and `A8 4A v`
+writes C007 the same way. Effect, right channel unchanged in the first three rows:
+
+| v | MOUT left | MOUT right |
+|---|---|---|
+| 0B | 0 | 1863448 |
+| 0F | 0 | 2266303 |
+| 17 | 0 | 2301198 |
+| 18 | 1652356 | 1652356 |
+
+So the host can repoint outputs. v = 17 being silent is not explained: 17 is the normal value.
+A8 4A wrote C007 just after, which may be the reason; the two were not separated.
+
+Next: the BUS is set on an edit page, so pressing the panel keys in the Master (CS4, 0000C0-CF)
+and reading what it sends would show the real message. `tools/bus_search.py` and
+`tools/byte_test.py` hold the sweeps.

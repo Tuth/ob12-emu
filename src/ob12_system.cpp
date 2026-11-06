@@ -21,6 +21,7 @@
 //   OB12_SLAVE_FILE=f  lines of seconds and hex bytes, sent straight to the Slave
 //   OB12_AUX_TONE=1  put a test tone on the even bus slot into DASP4 from the note time
 //   OB12_AOUT_CELLS=l,r  study: force the AOUT pointers C07F, C080, hex
+//   OB12_SLAVE_TICK=n  Slave PPG tick every n half frames, default 96 = 1 ms, 0 turns it off
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
 //   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
 //   OB12_POT_STEPS=t:channel:mux:value,...  one pot jumps at t seconds, value hex
@@ -235,6 +236,21 @@ int main(int argc, char** argv) {
     bool aux_tone = getenv("OB12_AUX_TONE") != nullptr;
     int aout_left = -1, aout_right = -1;  // study: point AOUT at other DMEM cells
     if (const char* text = getenv("OB12_AOUT_CELLS")) sscanf(text, "%x,%x", &aout_left, &aout_right);
+    // Study: OB12_SLAVE_WIN=from,to,from,to writes Slave PCs and RAM accesses to build/slave_N.txt.
+    struct SlaveWindow { double from, to; FILE* file; };
+    std::vector<SlaveWindow> slave_windows;
+    if (const char* list = getenv("OB12_SLAVE_WIN")) {
+        double a, b; int used;
+        while (sscanf(list, "%lf,%lf%n", &a, &b, &used) == 2) {
+            char name[64];
+            snprintf(name, sizeof name, "build/slave_%zu.txt", slave_windows.size());
+            slave_windows.push_back({a, b, fopen(name, "w")});
+            list += used;
+            if (*list == ',') list++;
+        }
+    }
+    if (const char* text = getenv("OB12_SLAVE_WATCH")) sscanf(text, "%x,%x", &s->watch_lo, &s->watch_hi);
+    int slave_tick = getenv("OB12_SLAVE_TICK") ? atoi(getenv("OB12_SLAVE_TICK")) : 96;
     int hop = getenv("OB12_HOP") ? atoi(getenv("OB12_HOP")) : 2;
     static int32_t wire[4][5][3][2];
     int watch = getenv("OB12_WATCH_C") ? strtol(getenv("OB12_WATCH_C"), nullptr, 16) : 0;
@@ -262,6 +278,11 @@ int main(int argc, char** argv) {
             double now = k / 96000.0;
             clock = now;
             m->pot_clock = now;
+            if (slave_tick && k % slave_tick == 0) s->ppg_tick();
+            for (auto& w : slave_windows) {
+                if (now >= w.from && now < w.to && !s->trace_file) s->trace_file = w.file;
+                else if (now >= w.to && s->trace_file == w.file) s->trace_file = nullptr;
+            }
             // One note per MIDI channel, half a second apart, into the Master's MIDI input.
             if (midi && midi_channel < 16 && now >= note_at + midi_channel * 0.5) {
                 m->midi_in({(u8)(0x90 | midi_channel), 0x3c, 0x64});
@@ -473,6 +494,9 @@ int main(int argc, char** argv) {
         int chip, first, last;
         if (sscanf(trace, "%x,%x,%x", &chip, &first, &last) == 3) voice_trace(host[chip].dsp, first, last);
     }
+    for (auto& entry : s->ext) printf("slave ext %06X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
+    for (auto& entry : s->iostat) printf("slave io %02X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
+    printf("slave vectors:"); for (auto& entry : s->vectors) printf(" %02X x%ld", entry.first, entry.second); printf(" ENIR %02X EIRR %02X ELVR %02X %02X TBTC %02X", s->io[0x28], s->io[0x29], s->io[0x2a], s->io[0x2b], s->io[0xa9]); puts("");
     m->lcd.save_pbm("build/lcd.pbm");
     m->save_hot("build/hot.txt");
     m->save_ram("build/ram.bin");

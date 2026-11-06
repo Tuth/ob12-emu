@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "AOUT path proven by forced pointers, silent because nothing is routed to it; clipping only at full Master Volume",
+    "phase": "Slave PPG tick modelled: voices recycle, envelope stages run; BUS message still not found",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -59,7 +59,8 @@
       "Primary 43 as unsigned low word product 24 bits down: bus flatness 0.77 to 0.06, note 48 at 261.5 Hz, chord at 131, 165, 196 Hz",
       "A/D is read as 8 bits: pots at 80 open MOUT, clean tones without forcing; old sweep results retracted",
       "Panel map from schematics plus measurement; A0 07 Osc 1 FM, A0 08 Osc 1 LFO1 Depth, Noise needs secondary 34",
-      "Master Volume curve measured; AOUT pointers C07F, C080 park on empty cells, forced pointers carry sound"
+      "Master Volume curve measured; AOUT pointers C07F, C080 park on empty cells, forced pointers carry sound",
+      "FC0300 identified as the PPG tick; voices recycled, 20 notes play, chord no longer clips at start-up volume"
     ],
     "blocked": []
   },
@@ -73,13 +74,13 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "Press panel keys in the Master (CS4 C0-CF), edit BUS and read the real message",
+    "Measure the true PPG tick rate; explain A8 49 and A8 4A; fix the 4% CPU clock excess",
     "Fill the DSP cell column of the panel map",
-    "Find the message that sets a Part BUS and writes C07F, C080; test program bytes 20-55 with sound kept",
     "Define the 1FC guard and the real noise sequence and level of secondary 34",
     "Find why note 60 sounds at C3, and what D0A4, D061 near Nyquist are",
     "Measure channels, timbres and pitch again after the mode fix",
     "Ask whether to offer the secondary 29 ordering finding to the TMS57070 project as a PR",
-    "Identify the ISR at FC0300 and what raises it",
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
     "Explain secondary 0x38",

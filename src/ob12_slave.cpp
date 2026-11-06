@@ -43,6 +43,10 @@ public:
         for (int vector = 0; vector < 256; vector++) set_vector(vector, 0xfc0002);
         set_vector(0x23, 0xfc0100);  // UART2 receive, identified from the code at FC0100
         set_vector(0x21, 0xfc0200);  // UART2 transmit, identified from the code at FC0200
+        // FC0300 clears PUF0 and PUF1, and the firmware masks it through ICR08: it is the PPG tick.
+        set_vector(0x1b, 0xfc0300);
+        io[0xb8] = 6;  // the level the firmware restores after masking
+        io[0x30] = 0x10;  // PIE0, set by the missing resident boot
         // The resident routines evidently set up the serial ports and interrupt levels;
         // the firmware never touches UART2 itself. Levels here are assumptions.
         uart[2].ssr |= 0x02;  // RIE
@@ -73,7 +77,7 @@ public:
         if (address < 0x100) { Stat& s = touch(iostat, address); s.reads++; return io_read(address); }
         if (address < 0x500) return internal[address];
         if (address >= 0xfc0000) return flash[address - 0xfc0000];
-        if (address >= 0xe00000 && address < 0xf00000) return ram[address & 0xffff];
+        if (address >= 0xe00000 && address < 0xf00000) { if (trace_file) fprintf(trace_file, "R %06X %02X\n", address, ram[address & 0xffff]); return ram[address & 0xffff]; }
         Stat& s = touch(ext, address & 0xfffff0);
         s.reads++;
         return 0xff;
@@ -83,13 +87,16 @@ public:
         if (address < 0x100) { Stat& s = touch(iostat, address); s.writes++; s.last = data; io_write(address, data); return; }
         if (address < 0x500) { internal[address] = data; return; }
         if (address >= 0xfc0000) { Stat& s = touch(flashw, address & 0xffff00); s.writes++; s.last = data; return; }
-        if (address >= 0xe00000 && address < 0xf00000) { ram[address & 0xffff] = data; return; }
+        if (address >= watch_lo && address < watch_hi) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data);
+        if (address >= 0xe00000 && address < 0xf00000) { if (trace_file) fprintf(trace_file, "W %06X %02X\n", address, data); ram[address & 0xffff] = data; return; }
         if (address == 0x68ff80) { dsp_byte(data); return; }
         Stat& s = touch(ext, address & 0xfffff0);
         s.writes++;
         s.last = data;
     }
 
+    u32 watch_lo = 0, watch_hi = 0;  // study: print writes in this range
+    FILE* trace_file = nullptr;  // study: PCs and RAM accesses
     void tick(int cycles) {
         cycles_total += cycles;
         for (auto& t : timer) t.advance(cycles);
@@ -100,6 +107,7 @@ public:
         if (timebase >= interval) { timebase -= interval; io[0xa9] |= 0x08; }
         update_irq();
     }
+    void ppg_tick() { io[0x30] |= 0x08; }  // PUF0; the rate is set by the missing boot
 
     long steps = 0;
     s64 cycles_total = 0;
@@ -153,6 +161,7 @@ protected:
         if (address == 0xffd3a0) debug_print();
         else if (address == 0xffd215 || address == 0xffd12e || address == 0xffd1bd) log_call(address);
         pc = address;
+        if (trace_file) fprintf(trace_file, "P %06X\n", address);
         steps++;
         hot[address]++;
         trail[trail_at] = address;
@@ -198,6 +207,7 @@ private:
             if (u.tx_vector == vector) return u.tx_pending();
             if (u.rx_vector == vector) return u.rx_pending();
         }
+        if (vector == 0x1b) return (io[0x30] & 0x18) == 0x18;
         if (vector == 0x22) return (io[0xa9] & 0x18) == 0x18;
         if (vector == 0x2a) return io[0x9f] & 1;  // delayed interrupt module, DIRR
         if (vector >= 0x0b && vector <= 0x19 && (vector & 1)) {
@@ -281,6 +291,7 @@ private:
         }
     }
 
+public:
     Stat& touch(std::map<u32, Stat>& table, u32 key) {
         auto found = table.find(key);
         if (found != table.end()) return found->second;
