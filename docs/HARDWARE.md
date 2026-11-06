@@ -771,7 +771,7 @@ is at 8A6C, stride 22, 12 voices: 01 playing, 08 released, 00 free.
 
 Modelled: vector 1B to FC0300, ICR08 = 6, PIE0 set, a tick from sample time, `OB12_SLAVE_TICK`.
 
-**The tick rate is inferred, not measured.** Default 1 ms. Evidence: one delay at note-on is
+Superseded by "PPG tick rate", which measures it. **The tick rate is inferred, not measured.** Default 1 ms. Evidence: one delay at note-on is
 24999 ticks, next to a round 25000. With 1 ms the amp envelope stage change lands 0.83 s after
 the note, and without the tick the level keeps rising for roughly 1.0-1.2 s, so a true rate
 may differ somewhat. Envelope times depend on this value.
@@ -819,3 +819,49 @@ A8 4A wrote C007 just after, which may be the reason; the two were not separated
 Next: the BUS is set on an edit page, so pressing the panel keys in the Master (CS4, 0000C0-CF)
 and reading what it sends would show the real message. `tools/bus_search.py` and
 `tools/byte_test.py` hold the sweeps.
+
+## PPG tick rate (measured against the firmware's own ramps)
+
+Method: with the tick off, a stage is never cut short, so a DSP ramp runs to its end. The Slave
+still writes its delay in ticks into the wheel. Move one pot, read the delay, and time the ramp
+from DMEM or CMEM per sample (`OB12_CELL_PICK`, `tools/tick_rate.py`). 16 runs.
+
+Which timer serves what, found by moving one pot at a time:
+
+| Timer | Moved by | Ramp |
+|---|---|---|
+| 0 | LFO1 Fade | D010 |
+| 1 | Osc Common Attack | C051, C052, C054 |
+| 2 | Filters Attack | not found |
+| 3 | Amplifiers Attack | D042 |
+
+| Timer | Delay (ticks) | Ramp end (s) |
+|---|---|---|
+| 1 | 227 | 0.3290 (C054) |
+| 1 | 762 | 0.8383 |
+| 1 | 4221 | 4.2970 |
+| 0 | 68 | 0.0671 |
+| 0 | 166 | 0.1633 |
+| 0 | 3097 | 3.1015 |
+| 0 | 4221 | 4.2479 |
+| 3 | 68 | 0.0897 |
+| 3 | 166 | 0.2179 |
+| 3 | 762 | 1.0161 |
+| 3 | 863 | 1.1490 |
+| 3 | 4221 | 5.8002 |
+
+Result:
+- Timer 1, between 762 and 4221: **0.99991 ms per tick**, the same on C051 and C054. There is a
+  fixed part of about 0.08 s on top, not explained.
+- Timer 0: 0.984 to 1.006 ms per tick across the range.
+- So the tick is 1 ms. This replaces the weak 24999 argument. It says what the firmware's own
+  tables assume, at 48 kHz; the PPG register values themselves stay unknown.
+- Timer 3 runs at about 1.33 times the delay. D042 is an exponential approach clipped at
+  7FFFFF: at C132 000129 it starts at 297 per sample and slows. So the Slave ends the amp attack
+  before the clip, at about 90% of top. Why that point is not known. Also, 1.33 ms is 64 samples:
+  that is noted, and nothing supports it as a tick.
+
+Check with the tick on, Common Attack pot A0: the stage change arrives 0.762 s after the note,
+as delayed, and the amp one 0.863 s after it.
+
+The note at 13 s here runs with timer 2 at 24999 ticks, 25 s, in this patch.

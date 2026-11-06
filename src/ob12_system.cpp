@@ -251,6 +251,8 @@ int main(int argc, char** argv) {
     }
     if (const char* text = getenv("OB12_SLAVE_WATCH")) sscanf(text, "%x,%x", &s->watch_lo, &s->watch_hi);
     int slave_tick = getenv("OB12_SLAVE_TICK") ? atoi(getenv("OB12_SLAVE_TICK")) : 96;
+    std::vector<int> cell_pick;  // study: OB12_CELL_PICK=10,42 logs only these DMEM cells
+    if (const char* list = getenv("OB12_CELL_PICK")) for (const char* c = list; c; c = strchr(c, ','), c = c ? c + 1 : c) cell_pick.push_back((int)strtol(c, nullptr, 16));
     int hop = getenv("OB12_HOP") ? atoi(getenv("OB12_HOP")) : 2;
     static int32_t wire[4][5][3][2];
     int watch = getenv("OB12_WATCH_C") ? strtol(getenv("OB12_WATCH_C"), nullptr, 16) : 0;
@@ -358,8 +360,8 @@ int main(int argc, char** argv) {
                     int pc = h.dsp->pc;
                     h.dsp->step();
                     if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to) {
-                        fwrite(h.dsp->dmem, 4, 256, cell_log);
-                        fwrite(h.dsp->cmem, 4, 512, cell_log);
+                        if (!cell_pick.empty()) { for (int c : cell_pick) fwrite(c < 256 ? &h.dsp->dmem[c] : &h.dsp->cmem[c - 256], 4, 1, cell_log); }
+                        else { fwrite(h.dsp->dmem, 4, 256, cell_log); fwrite(h.dsp->cmem, 4, 512, cell_log); }
                     }
                     if (n == 0 && start_trace > 0 && h.programs >= 2) { start_trace--; printf("S %03X %08X A %06X %06X DA %03X %03X CA %03X %03X\n", pc, h.dsp->pmem[pc], h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->da[0], h.dsp->da[1], h.dsp->ca[0], h.dsp->ca[1]); }
                     if (n == 0 && !watch_d.empty() && now >= note_at) for (auto& cell : watch_d) {
