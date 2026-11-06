@@ -91,7 +91,12 @@ int main(int argc, char** argv) {
         auto cmem = read_file(dir + "/" + prog + ".cmem.bin");
         auto hdr = read_file(dir + "/" + prog + ".hdr.bin");
         auto* a = new TMS57070::Emulator();
-        auto* b = new tms::Core();
+        tms::Options options;
+        if (getenv("OB12_CMP_PR")) {  // the options a patched public emulator should match
+            options.late_mode_change = options.queued_pointer_load = options.compare_3e = true;
+            options.maclo_multiply = options.maclo_unsigned = options.maclo_shift = true;
+        }
+        auto* b = new tms::Core(options);
         a->reset();
         a->register_sample_out_callback(on_out);
         a->register_external_bus_in_callback(on_in);

@@ -65,7 +65,8 @@
       "Buttons on P2/P3, encoder on INT0/1; BUS message A8 27 found on the real page; C0CE shown to be the AUX level",
       "A8 0E 00 ramps C0CE up; AOUT plays a chord through panel keys, MOUT exactly 0, nothing forced",
       "Core regression: current core with options off equals the core proved against the public emulator, 71.68M steps",
-      "Direct core_compare against public emulator 70357c3: 81.92M steps identical, options off, also with live CMEM"
+      "Direct core_compare against public emulator 70357c3: 81.92M steps identical, options off, also with live CMEM",
+      "PR draft and patch ready, verified 81.92M steps against own core with options on; not sent"
     ],
     "blocked": []
   },
@@ -79,13 +80,13 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "PR: waits for Thor to approve docs/PR-TMS57070.md and the patch",
     "Find whether a real start-up sends A8 0E; what the constant 113 on AOUT is",
     "Explain A8 49 and A8 4A; fix the 4% CPU clock excess",
     "Fill the DSP cell column of the panel map",
     "Define the 1FC guard and the real noise sequence and level of secondary 34",
     "Find why note 60 sounds at C3, and what D0A4, D061 near Nyquist are",
     "Measure channels, timbres and pitch again after the mode fix",
-    "Ask whether to offer the secondary 29 ordering finding to the TMS57070 project as a PR",
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
     "Explain secondary 0x38",

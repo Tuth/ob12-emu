@@ -1032,3 +1032,17 @@ listed under "Core comparison rerun". The own core still counts 4 unknown encodi
 
 Upstream's head has a divide step: 1F8, and a comment that 1FC takes its divisor from an internal
 ALU register, the same model as `divide_1fc`.
+
+## PR material (measured, nothing sent)
+
+Four findings are written up in `docs/PR-TMS57070.md`: secondaries 28-2B after the primary, 3E
+compare, two-step pointer secondaries, primaries 43-4F. The patch is a local branch of the
+clone, exported to `F:\Claude\OB-12-pr\ob12-findings.patch`, outside this repo.
+
+Check: public emulator 70357c3 with the patch, against the own core with `OB12_CMP_PR=1`, which
+turns on the six matching options: 81.92M steps identical, loaded and live CMEM, failures 0.
+With the patch the own core's unknown encodings fall from 4 to 2 in programs 0 and 1, and from 2
+to 1 in program 4.
+
+Kept out of the patch: secondary 34, 0C-0E port writes, the DMEM ring and 2E lock delay, the 1FC
+guard. So the patched public emulator alone will not reproduce the OB-12's output.
