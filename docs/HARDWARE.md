@@ -1218,3 +1218,30 @@ The old hash holds only without `rom/font_sector.bin`.
 
 Open: selected rows look heavy and some of their letters merge; zero is drawn as an O; the
 original font's sizes and shapes are unknown; characters above 7F have no glyphs.
+
+## CPU load (measured)
+
+`tools/pace_test`: feeds a 48 ms ring against the wall clock as the plugin does, 6 notes held,
+reports process CPU per second of sound.
+
+| Build | Cores busy | Ring empties | Offline speed |
+|---|---|---|---|
+| Spinning workers, before | 6.56 | 0 | 1.57 x |
+| Workers sleep on WaitOnAddress between bursts | 4.40-4.57 | 0 | 1.57 x |
+| Same, with one CPU thread (`OB12_ONE_CPU`) | 3.70, 5.07 | 0, then 633 | 1.21 x |
+| Profile guided f2mc16 and tms57070, `tools/build_pgo.bat` | 4.21-4.65 | 0 | 1.96 x |
+
+- Output stays identical, MD5 17c551a0a8e1d2eeef7d49160f9b9c1a.
+- Boot falls from about 6.7 s to 4.9 s with profile guidance.
+- The one CPU thread variant is not the default: it ran out of margin in one of two runs.
+- A shorter spin before sleeping costs more, not less: 2000 gives 4.65, 500 gives 5.52, 150 gives
+  5.11, as sleeping and waking cost system calls every half frame.
+- Profile guidance made the machine faster but did not lower the load much at real time. The load
+  is now mostly waiting inside a burst, not work.
+
+Profiling takes about 10 minutes, as the instrumented run is 0.03 x. It needs rerunning when the
+cores change, and `build_master.bat` overwrites the two objects, so it comes after that.
+
+Next, not done: two half frames per gate. Chips read each other two half frames late, so a
+batch of two is legal, if host bytes are applied between the two halves to keep the output
+identical. Then fewer threads, or a faster step().

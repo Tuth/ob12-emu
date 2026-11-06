@@ -72,7 +72,8 @@
       "First live play by Thor: loud, notes and scale correct through MIDI",
       "Engine library bit identical; vector panel; player; VST3 passes the Steinberg validator and plays through process()",
       "First DAW-free play by Thor through the plugin: presets sound sensible. Own core 15-20% faster than public on the main programs",
-      "Font format found; replacement sector built; firmware screens readable in the panel"
+      "Font format found; replacement sector built; firmware screens readable in the panel",
+      "CPU load 6.56 to about 4.4 cores at real time; offline 1.96 x with profile guidance; output identical"
     ],
     "blocked": []
   },
@@ -86,7 +87,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "CPU use: replace spinning with something a host can live with; speed up step()",
+    "CPU: two half frames per gate, then fewer threads or a faster step()",
     "Font polish: selected rows, real font sizes per number, glyphs above 7F, or a real flash dump",
     "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",

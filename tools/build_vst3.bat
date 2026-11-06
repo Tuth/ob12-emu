@@ -15,6 +15,6 @@ if not exist %BUNDLE% mkdir %BUNDLE%
 %CC% %FLAGS% /c "%SDK%\pluginterfaces\base\funknown.cpp" /Fobuild\vst3\funknown.obj
 %CC% %FLAGS% /c "%SDK%\public.sdk\source\vst\vstinitiids.cpp" /Fobuild\vst3\vstinitiids.obj
 %CC% %FLAGS% /c tools\vst3_iids.cpp /Fobuild\vst3\iids.obj
-%CC% /LD build\vst3\plugin.obj build\vst3\coreiids.obj build\vst3\funknown.obj build\vst3\vstinitiids.obj build\vst3\iids.obj build\panel_view.obj build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj d2d1.lib user32.lib ole32.lib winmm.lib /Fe%BUNDLE%\OB12.vst3
+%CC% /LD build\vst3\plugin.obj build\vst3\coreiids.obj build\vst3\funknown.obj build\vst3\vstinitiids.obj build\vst3\iids.obj build\panel_view.obj build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj synchronization.lib d2d1.lib user32.lib ole32.lib winmm.lib /Fe%BUNDLE%\OB12.vst3
 %CC% %FLAGS% tools\vst3_smoke.cpp build\vst3\coreiids.obj build\vst3\funknown.obj build\vst3\vstinitiids.obj ole32.lib /Febuild\vst3_smoke.exe
 echo BUILD_EXIT=%ERRORLEVEL%

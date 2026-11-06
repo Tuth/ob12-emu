@@ -1,3 +1,8 @@
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#undef min
+#undef max
 #include "emu.h"
 #include "f2mc16.h"
 #include "mb90611.h"
@@ -14,6 +19,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#pragma comment(lib, "synchronization.lib")
 
 #define OB12_NO_MAIN
 namespace master {
@@ -25,23 +31,31 @@ namespace slave {
 
 namespace {
 
+// Workers spin through the gaps of a burst and sleep on the address between bursts.
 struct Gate {
     alignas(64) std::atomic<long> go{0};
     alignas(64) std::atomic<int> left{0};
-    void open(int workers) { left.store(workers, std::memory_order_relaxed); go.fetch_add(1, std::memory_order_release); }
-    void wait() { for (long spins = 0; left.load(std::memory_order_acquire); spins++) { if (spins < 20000) _mm_pause(); else std::this_thread::yield(); } }
+    alignas(64) std::atomic<int> sleepers{0};
+    void open(int workers) {
+        left.store(workers, std::memory_order_relaxed);
+        go.fetch_add(1, std::memory_order_seq_cst);
+        if (sleepers.load(std::memory_order_seq_cst)) WakeByAddressAll(&go);
+    }
+    void wait() { while (left.load(std::memory_order_acquire)) _mm_pause(); }
     void done() { left.fetch_sub(1, std::memory_order_release); }
 };
 
-// Spins while the machine is running, gives the core back when it is held up.
+static int spin_limit = getenv("OB12_SPIN") ? atoi(getenv("OB12_SPIN")) : 2000;
+
 static void wait_for(Gate& gate, long seen, const std::atomic<bool>& stop) {
-    long spins = 0;
-    while (gate.go.load(std::memory_order_acquire) == seen) {
-        if (stop.load(std::memory_order_relaxed)) return;
-        if (++spins < 20000) _mm_pause();
-        else if (spins < 2000000) std::this_thread::yield();
-        else std::this_thread::sleep_for(std::chrono::microseconds(200));
+    for (int spins = 0; spins < spin_limit; spins++) {
+        if (gate.go.load(std::memory_order_acquire) != seen) return;
+        _mm_pause();
     }
+    gate.sleepers.fetch_add(1, std::memory_order_seq_cst);
+    while (gate.go.load(std::memory_order_seq_cst) == seen && !stop.load(std::memory_order_relaxed))
+        WaitOnAddress(&gate.go, &seen, sizeof seen, 5);
+    gate.sleepers.fetch_sub(1, std::memory_order_seq_cst);
 }
 
 // Host stream per chip: 0C header+PMEM, 05 CMEM, 03 then 5-byte address+value groups.
@@ -110,6 +124,7 @@ struct Engine::Impl {
     std::atomic<bool> stop{false};
     std::vector<std::thread> workers;
     std::string error;
+    bool one_cpu_thread = getenv("OB12_ONE_CPU") != nullptr;
     int32_t* out = nullptr;
     int made = 0;
 
@@ -179,9 +194,14 @@ struct Engine::Impl {
             }
         }
         const int slice = 167;
-        cpu_gate.open(1);
-        s->run(slice); s->tick(slice - s->cycles_left());
-        cpu_gate.wait();
+        if (one_cpu_thread) {
+            m->run(slice); m->tick(slice - m->cycles_left());
+            s->run(slice); s->tick(slice - s->cycles_left());
+        } else {
+            cpu_gate.open(1);
+            s->run(slice); s->tick(slice - s->cycles_left());
+            cpu_gate.wait();
+        }
         if (!error.empty()) throw std::runtime_error(error);
         if (k > 0) {
             dsp_gate.wait();
