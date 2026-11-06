@@ -4,6 +4,7 @@
 // register is a gap on the record, never a neutral read.
 #include "emu.h"
 #include "f2mc16.h"
+#include "mb90611.h"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -92,58 +93,6 @@ private:
     u8 mode = 0, display = 0;
     bool auto_write = false, auto_read = false;
     std::map<int, long> commands;
-};
-
-struct ReloadTimer {
-    int base = 0;
-    int vector = 0;
-    u16 tmcsr = 0, reload = 0, count = 0;
-    s64 prescale = 0;
-    bool running = false;
-    int divider() const { int csl = (tmcsr >> 10) & 3; return csl == 0 ? 2 : csl == 1 ? 8 : csl == 2 ? 32 : 0; }
-    void trigger() { count = reload; running = true; prescale = 0; }
-    void advance(int cycles) {
-        if (!running || !(tmcsr & 2) || !divider()) return;
-        prescale += cycles;
-        int div = divider();
-        while (prescale >= div) {
-            prescale -= div;
-            if (count == 0) {
-                tmcsr |= 4;  // UF
-                if (tmcsr & 0x10) count = reload; else { running = false; return; }
-            } else count--;
-        }
-    }
-    bool pending() const { return (tmcsr & 0x0c) == 0x0c; }
-};
-
-struct Uart {
-    int base = 0, tx_vector = 0, rx_vector = 0;
-    const char* name = "";
-    u8 scr = 0, smr = 0, ssr = 0x08;  // TDRE set
-    int tx_timer = 0, rx_timer = 0;
-    long sent = 0;
-    u8 rx_data = 0;
-    std::vector<u8> rx_queue;
-    std::vector<u8> head;
-    void advance(int cycles) {
-        if (tx_timer > 0 && (tx_timer -= cycles) <= 0) { tx_timer = 0; ssr |= 0x08; }
-        if (!rx_queue.empty() && (rx_timer -= cycles) <= 0 && !(ssr & 0x10)) {
-            rx_data = rx_queue.front();
-            rx_queue.erase(rx_queue.begin());
-            ssr |= 0x10;  // RDRF
-            rx_timer = 5120;  // one MIDI byte at 31250 baud
-        }
-    }
-    u8 read() { ssr &= ~0x10; return rx_data; }
-    void write(u8 data) {
-        sent++;
-        if (head.size() < 48) head.push_back(data);
-        ssr &= ~0x08;
-        tx_timer = 2000;
-    }
-    bool tx_pending() const { return (ssr & 0x08) && (ssr & 0x01); }
-    bool rx_pending() const { return (ssr & 0x10) && (ssr & 0x02); }
 };
 
 class Master : public f2mc16_device, public address_space {
@@ -255,6 +204,10 @@ public:
     T6963 lcd;
 
     // Execution count of every PC, for offline coverage analysis.
+    void save_slave_stream(const std::string& path) {
+        std::ofstream file(path, std::ios::binary);
+        file.write((const char*)uart[2].head.data(), uart[2].head.size());
+    }
     void save_ram(const std::string& path) {
         std::ofstream file(path, std::ios::binary);
         file.write((const char*)ram.data(), ram.size());
@@ -296,7 +249,7 @@ public:
         lcd.report();
         for (auto& u : uart) {
             printf("%s: %ld bytes:", u.name, u.sent);
-            for (u8 byte : u.head) printf(" %02X", byte);
+            for (size_t i = 0; i < u.head.size() && i < 48; i++) printf(" %02X", u.head[i]);
             puts("");
         }
         printf("vectors taken:");
@@ -580,6 +533,7 @@ int main(int argc, char** argv) {
     cpu->report();
     if (argc > 3) cpu->lcd.save_pbm(argv[3]);
     cpu->save_hot("build/hot.txt");
+    cpu->save_slave_stream("build/master_to_slave.bin");
     cpu->save_ram("build/ram.bin");
     return 0;
 }
