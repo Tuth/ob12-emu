@@ -26,8 +26,8 @@
     "vcs": "git status clean after commit",
     "carve": "python tools/ob12_carve.py rom/12dsp111-DSP-v1.11-FINAL.bin -o rom/dsp",
     "carve_pass": "exit 0; all 10 table entries OK",
-    "build_master": "tools\build_master.bat",
-    "run_master": "build\\ob12_master.exe rom 300000000 build\\lcd.pbm",
+    "build_master": "tools/build_master.bat",
+    "run_master": "build/ob12_master.exe rom 300000000 build/lcd.pbm",
     "run_master_pass": "no STOP line; UART1 shows FE bytes; LCD writes 35127 or more"
   },
   "status": {
