@@ -232,6 +232,37 @@ Noise investigation, later round. The fault changed form but is not solved:
 - All of these changes live only in the local emulator copy: 0x2E lock delay, ring, 0x43,
   1FC, audio port writes. They are listed here because that copy is not in this repo.
 
+## Own DSP core, `src/tms57070` (measured)
+
+Flat integer core, no external code at build time. The whole instrument now builds and runs
+from this repo alone: `src/ob12_system.cpp`.
+
+- `tools/tms_harness/core_compare.cpp`, options off, all five programs, 2000 frames each:
+  5.12M steps identical in PC, ACC, MACC, CR1, XRD, DA, CA, DMEM, CMEM. About 20 ns per step.
+  This proves agreement with the public emulator, not with silicon. Program coverage was
+  with default coefficients, so paths needing live parameters were less exercised.
+- **Licence:** this core is not clean-room. It was written after reading the public source,
+  and its behaviour comes from that work, while the code and structure are our own. Whether
+  that is enough is a judgement for Thor; asking the author remains the safe route.
+
+**Noise and impulse: solved.** Programs 5 and 9 are start-up code run before the main load.
+Program 9 ends `C70CD000`: DCIRC = CD, ring of 206 cells, as the address split predicted.
+Program 5 sets DIR and CIR for the voice chips. The old harness never let them run.
+With them run and the registers surviving the reload:
+- Output is exactly silent with no note: 0 from the 0.06 s fault onward.
+- Earlier noise and the 233 Hz impulse were harness faults, not DSP behaviour.
+- The earlier 187.5 Hz and 179 Hz readings came from those faulty runs.
+
+Options on in the system: audio ports, true ring, 2E lock delay, MACLO multiply. 1FC off.
+
+Open, in order:
+- MOUT and AOUT are silent even with notes, in both DASP4 phases. The voice bus into DASP4
+  carries signal on left, odd half frames, rising to RMS 111015. Right is zero. Phase 1 puts
+  that slot on D0D0; phase 0 puts it on D08, which goes nowhere. Phase 1 is the default.
+- The gain path needs finding: C77 and other coefficients are zero. They may come from a
+  Master message not yet sent, for example panel or volume values.
+- Unimplemented and hit every sample: 1FC, 3E flag 8, secondary 34.
+
 ## Tooling and licences
 
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some
