@@ -67,9 +67,21 @@ checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
     2 in program 4), secondary 0x34 (3 in programs 0 and 1, 2 in program 4).
   - The emulator's 4-deep stack overflows, so the harness wraps it. The program has no
     return path used here; 192 interrupts fired in 48000 samples, then stopped. Not understood.
-- **Audio output path not seen.** Programs 0, 1, 4 have no secondary 0x18-0x1A MACC-to-AX
-  words, so the emulator's output callback never fired. Each runs one secondary 0x38
-  external write per sample. Voice DSPs have no external RAM, so this needs explaining.
+- **Audio output path, found by test.** Secondary 0x0C, 0x0D, 0x0E with flag 4 (bit 14)
+  appear to write DMEM to AX1, AX2, AX3; flag 8 selects right. Without flag 4, 0x0C and
+  0x0D read AR1, AR2. The public emulator treats these as reads only, and 0x0E as empty.
+  Prediction tested on a patched local copy, 4000 frames, distinct sines on each input:
+  - Program 1: AX3L = AR2L and AX3R = AR2R, 100% bit-exact at lag 0.
+  - Program 0: AX3L = AR1L and AX3R = AR1R, 100%, matching 10/15 where DASP0's AR1 takes
+    the LFO and forwards it down the AR2/AX3 bus.
+  - Program 1: AX2L = AR1L 100% and AX2R = AR1R 93.7%, 2 half-frames late, with no voices
+    playing. This is the summing bus.
+  - Program 4 writes AX1, AX2, AX3, the pins 09/15 labels LFO, MOUT and AOUT.
+  - Rates: AX2 and AX3 on program 4 write once per frame (48 kHz, as FSxd on the DAC
+    side). AX L channels on the voice chain write twice per frame, matching the FSx2 clock.
+  - Open: why AX2R is 93.7% rather than 100%; program 4 outputs were silent in this test.
+- **Secondary 0x38.** One external write per sample in every large program, including
+  voice DSPs with no external RAM. Purpose unknown.
 - **Entry assignment hypothesis.** Entries 0-4 = DASP0-4 in normal use; 5-9 = short
   programs for the same chips, perhaps the Master's PROBEDASP tests. Needs the loader code.
 - **12-byte header meaning.** Read as big-endian CR0-CR3, `3CF3CF B90100 FCFF00 030000`

@@ -28,12 +28,13 @@
     "carve_pass": "exit 0; all 10 table entries OK"
   },
   "status": {
-    "phase": "Microcode executes on the public emulator in a local harness; four instructions unimplemented, audio output path unexplained",
+    "phase": "Audio port instructions identified by a bit-exact pass-through test; chain not yet linked, no voice parameters yet",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
       "Carved 5 distinct TMS57070 programs from the Slave table at FC2340; opcodes 99.3-100% known against a 59.4% control",
-      "Ran programs 0, 1, 4 for 48000 samples: 512/512 words visited, 0 PC discontinuities"
+      "Ran programs 0, 1, 4 for 48000 samples: 512/512 words visited, 0 PC discontinuities",
+      "Audio output path: 0x0C/0D/0E flag 4 writes AX1/2/3; AX3 pass-through 100% bit-exact on programs 0 and 1"
     ],
     "blocked": []
   },
@@ -47,7 +48,8 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Explain the audio output path of programs 0, 1, 4 (no MACC-to-AX secondaries)",
+    "Link all five DSPs in the harness per sheets 09/15 and 10/15 and repeat the pass-through test end to end",
+    "Explain AX2R 93.7% match and secondary 0x38",
     "Define 1FC, 0x3E flag 8, 0x43 MACLO and secondary 0x34 behaviour from the microcode",
     "Explain interrupts: 192 fired then stopped, no return path observed",
     "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
@@ -57,5 +59,6 @@
     "Reverse the Slave host-bus writes to derive PLD behaviour",
     "Decide TMS57070 core route: author permission or own implementation"
   ],
-  "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?"
+  "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?",
+  "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware."
 }
