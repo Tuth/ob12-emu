@@ -1164,3 +1164,27 @@ Not tested: a real DAW, the editor inside a host, mouse use of the controls by h
 instance. Each instance runs seven busy threads. Host MIDI takes a lock in process(), which is
 not real time safe yet. No parameters, no state saving, pitch bend and controllers from the host
 are not passed on. Measured speed ranged 1.14-1.59 x this round.
+
+## Core speed against the public emulator (measured)
+
+`core_compare`, Ryzen 9 5900X, one thread, both built with the same flags, public emulator at
+70357c3, same program and state, best of five rounds of 5M steps, taken in turn. Before each
+timing the two cores matched step by step, for 102400 steps per case.
+
+| Program | Own, ns per step | Public, ns per step | Public / own |
+|---|---|---|---|
+| prog0 | 21.3 | 25.0 | 1.18 |
+| prog1 | 20.7 | 24.9 | 1.20 |
+| prog4 | 19.8 | 22.8 | 1.15 |
+| prog5 | 7.2 | 12.7 | 1.77 |
+| prog9 | 7.0 | 12.6 | 1.79 |
+
+With the CMEM of a playing unit: 21.0 against 25.0, 21.2 against 25.6, 20.4 against 23.1. With the
+instrument's own options on, the own core takes 19.5-20.4 ns on the same programs, which is
+no slower; that row is own work only, as the public core does not do it.
+
+So on the programs that matter the own core is about 15-20% faster, not a different class. The
+short programs 5 and 9 only run at start-up. A chip has 10.4 us per half frame: 256 steps take
+about 5.2 us with the own core and 6.2 us with the public one, so both would fit.
+Not measured: the public emulator inside the instrument, which would also need its missing
+behaviours. Timing is a loop over step() with no hooks, so a plugin run adds gate waits on top.

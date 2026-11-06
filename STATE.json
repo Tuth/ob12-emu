@@ -70,7 +70,8 @@
       "Note 60 octave explained: timbre Osc 1 Shift, A0 00; tuning exact, 3F timbre plays 261.6 Hz",
       "Threads and pipeline: 0.30 x to 1.52 x real time, bit identical; OB12_LIVE plays through waveOut with MIDI in",
       "First live play by Thor: loud, notes and scale correct through MIDI",
-      "Engine library bit identical; vector panel; player; VST3 passes the Steinberg validator and plays through process()"
+      "Engine library bit identical; vector panel; player; VST3 passes the Steinberg validator and plays through process()",
+      "First DAW-free play by Thor through the plugin: presets sound sensible. Own core 15-20% faster than public on the main programs"
     ],
     "blocked": []
   },
@@ -84,11 +85,12 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "CPU use: replace spinning with something a host can live with; speed up step()",
+    "Font: Thor misses it now. Find or rebuild the FF0000 sector, or draw text from the Master strings",
     "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
     "Later, at Thor's request: model the analog output path, sheets 11-15; output is taken digitally from DASP4 AX2 today",
     "Live: test by ear with real MIDI; speed up the DSP core; WASAPI or plugin host for lower latency; stop spinning",
-    "Later, at Thor's request: measure performance, own core against Prehistoricman core",
     "Find what D0A4, D061 near Nyquist are; explain the factory timbre with word 523 Hz and fundamental 131 Hz",
     "Find whether a real start-up sends A8 0E; what the constant 113 on AOUT is",
     "Explain A8 49 and A8 4A; fix the 4% CPU clock excess",

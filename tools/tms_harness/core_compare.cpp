@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -96,6 +97,12 @@ int main(int argc, char** argv) {
             options.late_mode_change = options.queued_pointer_load = options.compare_3e = true;
             options.maclo_multiply = options.maclo_unsigned = options.maclo_shift = true;
         }
+        if (getenv("OB12_BENCH_ALL")) {  // the set the instrument runs; only for timing, run with 0 frames
+            options.audio_port_writes = options.true_dmem_ring = options.lock_delay = true;
+            options.divide_1fc = options.noise_generator = true;
+            options.late_mode_change = options.queued_pointer_load = options.compare_3e = true;
+            options.maclo_multiply = options.maclo_unsigned = options.maclo_shift = true;
+        }
         auto* b = new tms::Core(options);
         a->reset();
         a->register_sample_out_callback(on_out);
@@ -126,10 +133,18 @@ int main(int argc, char** argv) {
         }
         std::string label = std::string(prog) + (one.chip >= 0 ? " live" : "");
         if (compare(a, b, label.c_str(), frames) < 0) failures++;
-        auto t0 = std::chrono::high_resolution_clock::now();
-        for (long i = 0; i < 5000000; i++) b->step();
-        auto t1 = std::chrono::high_resolution_clock::now();
-        printf("   own core %.1f ns per step\n", std::chrono::duration<double, std::nano>(t1 - t0).count() / 5000000);
+        // Best of five rounds each, taken in turn, so other load hits both alike.
+        double own = 1e9, pub = 1e9;
+        for (int round = 0; round < 5; round++) {
+            auto t0 = std::chrono::high_resolution_clock::now();
+            for (long i = 0; i < 5000000; i++) b->step();
+            auto t1 = std::chrono::high_resolution_clock::now();
+            for (long i = 0; i < 5000000; i++) a->step();
+            auto t2 = std::chrono::high_resolution_clock::now();
+            own = std::min(own, std::chrono::duration<double, std::nano>(t1 - t0).count() / 5000000);
+            pub = std::min(pub, std::chrono::duration<double, std::nano>(t2 - t1).count() / 5000000);
+        }
+        printf("   ns per step: own %.1f, public %.1f, ratio %.2f\n", own, pub, pub / own);
         delete a;
         delete b;
     }
