@@ -3,7 +3,9 @@
 //
 // usage: ob12_system <rom dir> <seconds> <note seconds> <out.wav>
 //   OB12_DIRECT=n    send one note per channel 0..n-1 straight to the Slave, 1 s apart
-//   OB12_NOTE_CH=c   send one note on channel c straight to the Slave
+//   OB12_NOTE_CH=c   send one note on channel c straight to the Slave. It breaks running
+//                    status: the Master's next data bytes then read as notes. Use for study only
+//   OB12_MIDI_NOTES=3C,40  send these notes on MIDI channel 0 to the Master, 0.5 s apart
 //   OB12_VOICE_TRACE=chip,first,last  print one sample of a chip for a PC range, hex
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
 //   OB12_HOP=1|2     half frames a word takes from one chip to the next (default 2)
@@ -112,8 +114,8 @@ static void voice_trace(tms::Core* d, int first, int last) {
         uint32_t w = d->pmem[pc];
         d->step();
         if (pc >= first && pc <= last)
-            printf("%03X %08X A %06X %06X M %06X %06X DA %03X %03X CA %03X %03X D04 %06X\n", pc, w, d->acc[0] & 0xffffff, d->acc[1] & 0xffffff,
-                   d->mac_upper(d->mac[0]) & 0xffffff, d->mac_upper(d->mac[1]) & 0xffffff, d->da[0], d->da[1], d->ca[0], d->ca[1], logical_d(d, 4) & 0xffffff);
+            printf("%03X %08X A %06X %06X M %06X %06X DA %03X %03X CA %03X %03X D00 %06X D02 %06X D42 %06X %06X %06X\n", pc, w, d->acc[0] & 0xffffff, d->acc[1] & 0xffffff,
+                   d->mac_upper(d->mac[0]) & 0xffffff, d->mac_upper(d->mac[1]) & 0xffffff, d->da[0], d->da[1], d->ca[0], d->ca[1], logical_d(d, 0) & 0xffffff, logical_d(d, 2) & 0xffffff, logical_d(d, 0x42) & 0xffffff, logical_d(d, 0x43) & 0xffffff, logical_d(d, 0x44) & 0xffffff);
     }
 }
 
@@ -160,6 +162,14 @@ int main(int argc, char** argv) {
     int midi_channel = 0;
     int note_channel = getenv("OB12_NOTE_CH") ? atoi(getenv("OB12_NOTE_CH")) : -1;
     bool note_sent = false;
+    std::vector<u8> midi_notes;
+    size_t next_midi = 0;
+    if (const char* list = getenv("OB12_MIDI_NOTES")) {  // hex, comma separated
+        for (char* p = (char*)list; *p;) {
+            midi_notes.push_back((u8)strtol(p, &p, 16));
+            if (*p == ',') p++;
+        }
+    }
     int32_t d04_peak[5] = {};
     int hop = getenv("OB12_HOP") ? atoi(getenv("OB12_HOP")) : 2;
     static int32_t wire[4][5][3][2];
@@ -175,6 +185,10 @@ int main(int argc, char** argv) {
             if (midi && midi_channel < 16 && now >= note_at + midi_channel * 0.5) {
                 m->midi_in({(u8)(0x90 | midi_channel), 0x3c, 0x64});
                 midi_channel++;
+            }
+            if (next_midi < midi_notes.size() && now >= note_at + next_midi * 0.5) {
+                m->midi_in({0x90, midi_notes[next_midi], 0x64});
+                next_midi++;
             }
             if (note_channel >= 0 && !note_sent && now >= note_at) {
                 s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)(0x90 | note_channel), 0x3c, 0x64});
@@ -301,6 +315,14 @@ int main(int argc, char** argv) {
         printf("\n  D00:");
         for (int a = 0; a < 0x30; a++) printf(" %06X", logical_d(d, a) & 0xffffff);
         puts("");
+    }
+    if (const char* name = getenv("OB12_DUMP")) {  // whole DMEM by program address, and CMEM
+        std::ofstream dump(name);
+        char text[64];
+        for (int n = 0; n < 5; n++) for (int a = 0; a < 512; a++) {
+            snprintf(text, sizeof text, "%d %03X %06X %06X\n", n, a, a < 256 ? logical_d(host[n].dsp, a) & 0xffffff : 0, host[n].dsp->cmem[a] & 0xffffff);
+            dump << text;
+        }
     }
     if (const char* trace = getenv("OB12_VOICE_TRACE")) {  // chip,first,last in hex
         int chip, first, last;

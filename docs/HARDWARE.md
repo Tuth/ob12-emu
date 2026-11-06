@@ -300,8 +300,7 @@ harness A/D was constant. With every pot moving from 14 s on (`OB12_POT_SWEEP`):
   passed is not measured, though channel 0 was sent first and writes began at once.
 - Master turns MIDI channel into Slave channel 4. DASP0 then takes the voice: CMEM writes rise
   from 3 to 37091.
-- That note is silent: voice output and MOUT measure 0. Still true with the bus fixed below,
-  and it is not explained by the timbre: the same note sent direct on channel 4 sounds.
+- That single note is silent, and so are two. See "Voice slots" below: the path works.
 
 Silent timbre study:
 - The Master loads four timbres, `F0 7E 00..03`, and program data `F0 7E 04`.
@@ -359,7 +358,10 @@ Hop 2, phase 0 are now the defaults: all five chips in step, no phase offset. Ho
 because the firmware's summing bus needs it. Serial timing on the board is not measured.
 The earlier "DASP1 and DASP3 output 82" was an artefact of sampling odd half frames only.
 
-One note per Slave channel, hop 2, phase 0, note at 16 s, pots moving from 14 s:
+**Caveat on this table.** Direct injection is not one note, see "Voice slots". It shows what
+each Slave channel does with several notes, not a single-note result.
+
+One note injected per Slave channel, hop 2, phase 0, note at 16 s, pots moving from 14 s:
 
 | Slave channel | DASP4 AX2 L RMS | Sound |
 |---|---|---|
@@ -368,13 +370,48 @@ One note per Slave channel, hop 2, phase 0, note at 16 s, pots moving from 14 s:
 | 2, 3, 6 | 0 | silent |
 
 Idle with no note: MOUT exactly 0 for 22 s. Right channel, AOUT and AX2 R stay 0; D01 and D03
-are 0 on every chip, so the voices never write the right bus. 116 on slot A is not explained.
+are 0 on every chip, so the voices never write the right bus.
+
+Slot A's constant is not audio. M0 holds 000074 at 1FE and D02 holds the same value; with one
+note both are 000090. The `00021002` at 003 stores into D02 rather than clearing it.
+
+## Voice slots (measured)
+
+**The Master path works.** The Master's stream and the direct stream differ only at the note:
+
+    MIDI:   ... 10 5e  94 3c 64  a0 3c 65 35 7f 2a 5f b0 ...
+    direct: ... 10 5e  (94 3c 64 injected)  3c 65 35 7f 2a 5f b0 ...
+
+The Master resends status `A0` after a note. My injection does not, so the pot data after it
+can read as more notes under running status. That fits DASP1 receiving writes only in direct
+runs. It is inferred from the bytes, the Slave's parser was not traced.
+
+Notes sent through the Master with `OB12_MIDI_NOTES`, 0.5 s apart, from 16 s:
+
+| Notes | Result |
+|---|---|
+| 3C; 37; 2A; 3C at 18.2 s | silent, except 37: RMS 78, 1500 Hz multiples, not studied |
+| 3C,3C; 3C,40 | silent |
+| 3C,40,43; 3C,35,2A | sound starts at 17.0 s, the third note; noise-like, flatness 0.84 |
+
+So sound needs the third voice of DASP0. It is voice slot, not time: a single note at 18.2 s
+is also silent.
+
+The three voice blocks, stride 6B from 10B, are not the same code. Slots 0 and 1 have a stage
+at 11C-12B and 187-196, using C1C9/C1CA and cells D04E-50, D05F-61. Slot 2 has none there; its
+words at 04A-062 use C1CB. The signal stops at that stage: 186 holds M0 FEDBBF, 187 reads 0.
+With one note M0 is 02C5B3 at 11B and 0 at 11C, with C1C9 = 200000. The class 2 word `9002ABC9`
+reads D04E, and D04E-50 stay 0, so the stage has no input that I can find. Slot 0 output is
+then 0 with one note, FFFFA2 with three; slot 2 gives 008991.
+
+Rejected: secondary 34 as noise, retested with one note on the fixed bus, levels unchanged.
+Its real meaning remains unknown, and it runs just before this stage in all three slots.
 
 Open:
-- MIDI through the Master is silent, while direct channel 4 sounds. Master sends `94 3C 64`;
-  DASP0 gets writes, but DASP1 gets none, unlike direct channel 4 (1011 writes in the first
-  second). Not found yet.
-- Timbre 0 being noise-like: the patch, or an emulation fault. Channels 2, 3 silent: same.
+- What feeds D04E-50. Candidates: secondary 34 storing to DB0, secondary 3E flag 8.
+- Timbre 0 being noise-like: the patch, or an emulation fault.
+- Whether the 196 Hz reading came from another note than 60. Direct runs may have played
+  extra notes, so note 60 has never been measured alone.
 
 ## Tooling and licences
 
