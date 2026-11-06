@@ -26,6 +26,7 @@ namespace slave {
 using namespace TMS57070;
 
 void unk_hit(int, const char*) {}
+void dmem_touch(int, int) {}
 static void on_out(Channel, int32_t) {}
 static int32_t on_in(uint32_t) { return 0; }
 static void on_ext(int32_t, uint32_t) {}
@@ -137,7 +138,7 @@ int main(int argc, char** argv) {
     int direct_limit = getenv("OB12_DIRECT") ? atoi(getenv("OB12_DIRECT")) : 0;
     long frames = 0, count = 0;
     long total_half_frames = (long)(seconds * 96000);
-    bool on_done = false, off_done = false;
+    bool on_done = false, off_done = false, phase_set = false;
     bool direct = getenv("OB12_DIRECT") != nullptr;
     int direct_channel = 0;
     if (direct) on_done = off_done = true;
@@ -176,6 +177,9 @@ int main(int argc, char** argv) {
                     d->AR1L.value = ax2l[n - 1]; d->AR1R.value = ax2r[n - 1];
                     d->AR2L.value = ax3l[n - 1]; d->AR2R.value = ax3r[n - 1];
                 }
+                // Chip start phase is not modelled. DASP4 reads the voice bus in the half frame
+                // where its program expects it, so offset it by one half frame once.
+                if (!phase_set) { phase_set = true; for (int i = 0; i < 256; i++) host[4].dsp->step(); }
                 for (int n = 0; n < 5; n++) {
                     if (!host[n].running) continue;
                     for (int i = 0; i < 256; i++) host[n].dsp->step();

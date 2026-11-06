@@ -191,9 +191,29 @@ Not understood or not working:
 - Level keeps rising for as long as notes hold, with no note-off sent. Unexplained.
 - Channel 0 alone gave silence; the signal appears with the next channels.
 - A MIDI note sent to the Master is received but not forwarded to the Slave.
-- DASP4 outputs stay silent, so nothing reaches MOUT or AOUT.
+- DASP4 output now passes signal, with a large fault: see below.
 - Secondary 0x34 is a noise generator per the public IDA module, 3 uses per voice DSP.
   It, 1FC, 0x3E flag 8 and 0x43 MACLO remain unimplemented in the local emulator.
+
+## DASP4 output (measured)
+
+Why it was silent, found with `tools/tms_harness/dasp4_trace.cpp`, a differential trace:
+- Program 4 stores input at D00/D04 and reads D03, D0B, D0F, D11. No word writes those
+  addresses directly: they are the same data some samples later through circular DMEM.
+- Word 000 sets LDMEM, so word 001, the circular step, never advanced DOFF in the emulator.
+- Hypothesis, applied in the local emulator copy only: a lock set by secondary 0x2E does not
+  yet cover the next instruction. With it the signal spreads to over 200 state items and
+  outputs open. It fits the program but is not checked against silicon.
+- Half-frame phase: DASP4 reads the voice bus at D0D0/D0D1 in one half frame and at D08/D0C
+  in the other. D08/D0C went nowhere in this run. The harness now offsets DASP4 by 256 steps.
+  Real chip start phase is unknown.
+
+Result with notes sent to the Slave, 20 s emulated:
+- MOUT and AOUT carry signal on both channels, peaks near full scale.
+- **Noise fault:** output starts 0.06 s after DSP start with no note played. RMS about 5400 of
+  32768, spectrally flat (0.72), the same before and after notes. Cause unknown.
+- The note is present under it: peaks 187.5, 375, 562.5, 750 Hz and a second series at 179,
+  366.5, 554, 741.5 Hz. The voice bus earlier read 196 Hz; the change is unexplained.
 
 ## Tooling and licences
 
