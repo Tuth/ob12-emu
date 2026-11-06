@@ -1002,3 +1002,33 @@ mean the option is unused. prog5 and prog9 never differ. Limits of this table: t
 did nothing here, probably because DCIRC stays 0 without program 9 before it, so it was not
 exercised; prog4 maclo_multiply did not differ although word 0E8 uses primary 43, reason not
 checked; maclo_unsigned and maclo_shift only act with maclo_multiply and were not tried.
+
+## Direct comparison with the public emulator (measured)
+
+`Prehistoricman/TMS57070` cloned at 70357c3 (2026-10-23), the current head, into a scratch folder
+outside this repo. It still has no licence file, so nothing of it is committed.
+`tools/build_compare.bat <folder>` builds it unmodified; `open_private.h` is forced in only to read
+its registers. `core_compare` now takes an `OB12_DUMP` file for live CMEM.
+
+Current core, options off, 20000 frames per case, every step: PC, ACC, MACC upper word, CR1, XRD,
+DA, CA, all DMEM and CMEM.
+
+| Program | Loaded CMEM | CMEM of a playing unit |
+|---|---|---|
+| prog0 | 10240000 identical | 10240000 identical |
+| prog1 | 10240000 identical | 10240000 identical |
+| prog4 | 10240000 identical | 10240000 identical |
+| prog5 | 10240000 identical | - |
+| prog9 | 10240000 identical | - |
+
+81.92M steps, failures 0. This replaces the two link argument above: the live CMEM rows now have
+a public result behind them.
+
+Limits: the input is a test sine, one voice state from one dump, and `core_compare` reads fewer
+fields than `core_regress`. This shows agreement with the public emulator, not with silicon.
+All inferred options stay off here, so none of them is tested by this; those are the differences
+listed under "Core comparison rerun". The own core still counts 4 unknown encodings in programs
+0 and 1 and 2 in program 4 with options off.
+
+Upstream's head has a divide step: 1F8, and a comment that 1FC takes its divisor from an internal
+ALU register, the same model as `divide_1fc`.

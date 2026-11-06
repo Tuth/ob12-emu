@@ -2,16 +2,26 @@
 // programs and input, with all inferred options off, and compares state after every step.
 // The public emulator is built from a local, unmodified copy; it is not in this repo.
 //
-// usage: core_compare <rom/dsp dir> <frames>
-#include "TMS57070.h"
-#include "tms57070/tms57070.h"
+// usage: core_compare <rom/dsp dir> <frames> [dump file from OB12_DUMP]
+// With a dump, programs 0, 1 and 4 run again with the CMEM of a playing instrument.
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <iostream>
 #include <vector>
+// The test reads the emulator's registers directly.
+#define _ALLOW_KEYWORD_MACROS
+#define private public
+#include "TMS57070.h"
+#undef private
+#include "tms57070/tms57070.h"
 
 static void on_out(TMS57070::Channel, int32_t) {}
 static int32_t on_in(uint32_t) { return 0; }
@@ -65,7 +75,18 @@ int main(int argc, char** argv) {
     std::string dir = argv[1];
     int frames = atoi(argv[2]);
     int failures = 0;
-    for (const char* prog : {"prog0", "prog1", "prog4", "prog5", "prog9"}) {
+    std::vector<std::vector<int32_t>> live(5);
+    if (argc > 3) {
+        std::ifstream dump(argv[3]);
+        int chip;
+        std::string addr, d, c;
+        while (dump >> chip >> addr >> d >> c) live[chip].push_back((int32_t)strtol(c.c_str(), nullptr, 16));
+    }
+    struct Case { const char* prog; int chip; };
+    std::vector<Case> cases = {{"prog0", -1}, {"prog1", -1}, {"prog4", -1}, {"prog5", -1}, {"prog9", -1}};
+    if (argc > 3) cases.insert(cases.end(), {{"prog0", 0}, {"prog1", 1}, {"prog4", 4}});
+    for (auto& one : cases) {
+        const char* prog = one.prog;
         auto pmem = read_file(dir + "/" + prog + ".pmem.bin");
         auto cmem = read_file(dir + "/" + prog + ".cmem.bin");
         auto hdr = read_file(dir + "/" + prog + ".hdr.bin");
@@ -93,7 +114,13 @@ int main(int argc, char** argv) {
             a->CMEM[i].value = w;
             b->cmem[i] = (w << 8) >> 8;
         }
-        if (compare(a, b, prog, frames) < 0) failures++;
+        if (one.chip >= 0) for (int i = 0; i < 512; i++) {
+            int32_t w = live[one.chip][i];
+            a->CMEM[i].value = w;
+            b->cmem[i] = (w << 8) >> 8;
+        }
+        std::string label = std::string(prog) + (one.chip >= 0 ? " live" : "");
+        if (compare(a, b, label.c_str(), frames) < 0) failures++;
         auto t0 = std::chrono::high_resolution_clock::now();
         for (long i = 0; i < 5000000; i++) b->step();
         auto t1 = std::chrono::high_resolution_clock::now();
