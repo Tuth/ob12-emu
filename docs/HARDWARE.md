@@ -500,3 +500,41 @@ Open:
 - Why note 3C sounds an octave below 261.6 Hz: patch setting or fault, unknown.
 - Secondary 34 still unimplemented; the 1FC zero guard is still a hypothesis.
 - AOUT stays 0. The core comparison was not rerun; both options default to off.
+
+## Low MAC word multiply (firmware evidence, not checked on silicon)
+
+**Retraction.** "D0A4, D061, D09E are the noise" was a suspicion and it is false. Period
+correlation per cell (`tools/cell_period.py`) showed only D048, D0AD and what they feed were
+aperiodic: D048 0.09, D09C 0.08. D0A4 and D061 still run near Nyquist, but they do not reach
+the bus with these notes. What they are remains open.
+
+The noise came from primary 43, at 0DD, 154, 1BF, also 0E8 and 166 in program 4. My first
+model took the low MAC word as signed and left the product at full scale, so 0DE added two
+terms of the wrong size and D0AD jumped between saturated values 725800 and 8DA7E0. Saturation
+is off from 0E2, so the error then wrapped into D048.
+
+Two options, on by default in `ob12_system`, off in the core comparison:
+- `maclo_unsigned`: the low word has no sign. Bus autocorrelation 0.47 to 0.95.
+- `maclo_shift`: the product sits 24 bits lower, as double precision needs. 0.95 to 0.996.
+
+Both are inferred. The shift is the strongest evidence here: D0AD turns smooth and D000 has no
+energy above 4 kHz. Program 4 changes with this too, and was not studied separately.
+
+Measured, no pots, voice bus:
+
+| Notes | Pitch | Autocorrelation | Flatness |
+|---|---|---|---|
+| 3C | 130.5 Hz FFT, 130.79 Hz autocorrelation | 0.996 | 0.062 |
+| 48 | 261.5 Hz FFT, 262.30 Hz autocorrelation | 0.998 | 0.002 |
+| 3C, 40, 43 | 131, 165, 196 Hz | | 0.038 |
+
+So key tracking and three voices work, and idle stays 0. Left and right slots read the same.
+
+Open:
+- MOUT is not clean yet. With OB12_POT_SWEEP=12 its flatness is 0.50-0.59, and the sweep sets
+  arbitrary parameters, so the cause is not separated from the patch values.
+- OB12_FORCE_GAIN puts full scale DC on MOUT while idle. The chord appears at 131, 165, 196 Hz
+  but clipped. Those cells are not simply gain, or the value is wrong. Real panel start
+  values are still unknown.
+- Note 60 sounds at C3, an octave below 261.6 Hz: patch or fault, unknown.
+- AOUT stays 0. Secondary 34 unimplemented. The core comparison was not rerun.

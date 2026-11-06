@@ -344,7 +344,9 @@ void Core::primary(uint32_t word) {
         if (options.maclo_multiply) {
             int32_t d = dmem[dmem_operand(word)];
             bool is_unsigned = op & 8;
-            multiply(unit, s24(mac_lower(mac[unit])), pick(d, is_unsigned), negate);
+            int64_t low = options.maclo_unsigned ? (int64_t)mac_lower(mac[unit]) : (int64_t)s24(mac_lower(mac[unit]));
+            multiply(unit, low, pick(d, is_unsigned), negate);
+            if (options.maclo_shift) mac[unit] >>= 24;
         } else {
             unknown[word & 0xff000000]++;
         }

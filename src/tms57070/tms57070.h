@@ -23,6 +23,8 @@ struct Options {
     bool noise_generator = false;    // secondary 34 stores a noise word; real sequence unknown
     bool late_mode_change = false;   // secondaries 28-2B act after the primary of the same word
     bool queued_pointer_load = false;  // secondaries 04-06, 08, 09 land two steps later, like C1-C5
+    bool maclo_unsigned = false;     // primary 43 takes the low MAC word as unsigned
+    bool maclo_shift = false;        // primary 43 product sits 24 bits lower, for double precision
     bool compare_3e = false;         // primary 3E flag 8 compares DMEM with CMEM, flags only
 };
 

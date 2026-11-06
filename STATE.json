@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Voices have pitch: 3C at 130.5 Hz, oscillators track the key, idle bus 0, MOUT balanced; signal is still very noisy",
+    "phase": "Voice bus is clean: exact pitch, key tracking, three note chord, idle 0; MOUT still needs real panel values",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -55,7 +55,8 @@
       "Two-slot audio bus: hop 2, phase 0; summing bus forms, MOUT left RMS 82349 with three notes, idle exactly 0",
       "Notes through the Master reach the DSPs; third note sounds; direct injection shown to break running status",
       "Mode secondaries act after the primary: table stride 0x15 confirmed by firmware constants; CMEM tables no longer destroyed",
-      "Primary 3E flag 8 as compare and two-step pointer secondaries: tables survive, signal passes the filter stage, pitch measured"
+      "Primary 3E flag 8 as compare and two-step pointer secondaries: tables survive, signal passes the filter stage, pitch measured",
+      "Primary 43 as unsigned low word product 24 bits down: bus flatness 0.77 to 0.06, note 48 at 261.5 Hz, chord at 131, 165, 196 Hz"
     ],
     "blocked": []
   },
@@ -69,8 +70,8 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Find the noise: filter sections D0A4, D061, D09E unstable near Nyquist even idle",
-    "Find why note 48 has no clear pitch on the bus while its oscillators run at 261 Hz",
+    "Make MOUT clean: find real panel start values and what DASP4 C00D, C00F, C0CB do",
+    "Find why note 60 sounds at C3, and what D0A4, D061 near Nyquist are",
     "Measure channels, timbres and pitch again after the mode fix",
     "Ask whether to offer the secondary 29 ordering finding to the TMS57070 project as a PR",
     "Map pots to parameters; model realistic panel start values",

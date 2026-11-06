@@ -117,8 +117,8 @@ static void voice_trace(tms::Core* d, int first, int last) {
         uint32_t w = d->pmem[pc];
         d->step();
         if (pc >= first && pc <= last)
-            printf("%03X %08X A %06X %06X M %06X %06X DA %03X %03X CA %03X %03X D00 %06X D02 %06X D42 %06X %06X %06X DB6 %06X d2 %06X %06X\n", pc, w, d->acc[0] & 0xffffff, d->acc[1] & 0xffffff,
-                   d->mac_upper(d->mac[0]) & 0xffffff, d->mac_upper(d->mac[1]) & 0xffffff, d->da[0], d->da[1], d->ca[0], d->ca[1], logical_d(d, 0) & 0xffffff, logical_d(d, 2) & 0xffffff, logical_d(d, 0x42) & 0xffffff, logical_d(d, 0x43) & 0xffffff, logical_d(d, 0x44) & 0xffffff, logical_d(d, 0xb6) & 0xffffff, d->mac_upper(d->mac_d2[0]) & 0xffffff, d->mac_upper(d->mac_d2[1]) & 0xffffff);
+            printf("%03X %08X A %06X %06X M %06X %06X DA %03X %03X CA %03X %03X D00 %06X D02 %06X D42 %06X %06X %06X DB6 %06X d2 %06X %06X CR1 %06X lo %06X\n", pc, w, d->acc[0] & 0xffffff, d->acc[1] & 0xffffff,
+                   d->mac_upper(d->mac[0]) & 0xffffff, d->mac_upper(d->mac[1]) & 0xffffff, d->da[0], d->da[1], d->ca[0], d->ca[1], logical_d(d, 0) & 0xffffff, logical_d(d, 2) & 0xffffff, logical_d(d, 0x42) & 0xffffff, logical_d(d, 0x43) & 0xffffff, logical_d(d, 0x44) & 0xffffff, logical_d(d, 0xb6) & 0xffffff, d->mac_upper(d->mac_d2[0]) & 0xffffff, d->mac_upper(d->mac_d2[1]) & 0xffffff, d->cr[1], d->mac_lower(d->mac[1]));
     }
 }
 
@@ -141,6 +141,8 @@ int main(int argc, char** argv) {
     options.noise_generator = getenv("OB12_NOISE") != nullptr;
     options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
     options.compare_3e = getenv("OB12_NO_3E") == nullptr;
+    options.maclo_shift = getenv("OB12_MACLO_NO_SHIFT") == nullptr;
+    options.maclo_unsigned = getenv("OB12_MACLO_SIGNED") == nullptr;
     options.queued_pointer_load = getenv("OB12_EARLY_POINTER") == nullptr;
 
     auto* m = new master::Master();
