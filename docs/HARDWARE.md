@@ -915,8 +915,43 @@ So C0CE is a linear AUX output level, and the signal is the bus word itself: 178
 1786257. C07F, C080 need no change. This replaces the "pointers parked on empty cells" reading:
 D00B is D00A one sample later, because the ring moves, and my writer probe ignored that.
 
-Not found: what writes C0CE. It is 0 in the loaded CMEM (C0CB is 03513F there) and no host write
+Retracted in "What writes C0CE". Not found: what writes C0CE. It is 0 in the loaded CMEM (C0CB is 03513F there) and no host write
 touched it, with AUX active, through: `A8` n for all n at 7F, 40, 01; `F0 7F 30 04 p` for p 0-1F
 with values 007F, 047F, 7F7F, 0100. So on a real unit either another message sets it, or a word
 of mine is wrong and the value should not depend on C0CE. `OB12_FORCE_C` is a study switch only;
 nothing is forced by default.
+
+## What writes C0CE: AUX MODE (measured)
+
+Found by reading the Slave, not by sweeping. The earlier search for `#0x00CE` missed the byte
+form `MOV A,#0xCE`. At FDF1A9-FDF1D1 one routine makes two calls to FCA133, the ramped write, with
+chip 4: C0C8 and C0CE, one to the constant at FC6706 and the other to 0, chosen by D:D139.
+
+So `A8 0E v` is AUX MODE and sets the pair:
+- `A8 0E 00`, STANDARD: C0CE ramps up in steps of 040000 to 7FFFFF. AOUT carries AUX Parts.
+- `A8 0E 01`, COUPLED: C0C8 up, C0CE down. AUX Parts come out of MOUT.
+
+My sweeps sent 01, 40, 7F, never 00. In "Panel keys" I wrote that no message reaches C0CE; that
+was wrong, and so was the doubt about my DASP4 model. No core change was needed.
+
+End to end through the panel, nothing forced: PROGRAM, F4, 2, encoder 3 steps to AUX STEREO, ESC,
+ROUTERS, F2, encoder to COUPLED and back to STANDARD, then notes 3C, 40, 43 over MIDI:
+
+| Output | Left RMS | Right RMS | Flatness | Lines |
+|---|---|---|---|---|
+| MOUT | exactly 0 | exactly 0 | - | - |
+| AOUT | 2514445 | 1679453 | 0.006 | 131.1, 164.7, 195.8 Hz |
+
+Direct `A8 27 03`, `A8 0E 00`, note 3C: AOUT 1771827, 1286908, MOUT 0. A first `A8 0E 00` works
+as well, without COUPLED before it, so there is no change check in the way.
+
+Why the panel walk needs COUPLED and back: the page shows STANDARD from the start and the
+encoder sends only on a change, while the 835 byte boot stream holds no `A8 0E`. So after boot
+in this harness C0CE is 0 although the display says STANDARD. Whether a real unit sends it at
+start up is not known: a Master path not reached here may do so.
+
+With C0CE up and no note, AOUT left reads a constant 113, the slot A word 116 seen on the bus
+since the two-slot study. Source unknown.
+
+C0C8 and C0CE act on the AUX path in the words 0F1-100. Not traced further. The manual says EQ
+does not affect AUX (p.74); that is not measured here.

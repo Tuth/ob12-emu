@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Panel keys and encoder work; BUS is A8 27 v; AOUT needs C0CE, whose writer is not found",
+    "phase": "All four outputs reachable from the panel: A8 27 sets BUS, A8 0E sets AUX MODE and C0CE; AOUT sounds end to end",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -62,7 +62,8 @@
       "Master Volume curve measured; AOUT pointers C07F, C080 park on empty cells, forced pointers carry sound",
       "FC0300 identified as the PPG tick; voices recycled, 20 notes play, chord no longer clips at start-up volume",
       "PPG tick 0.99991 ms per tick from Osc Common Attack delays against DSP ramps; timers 0-3 mapped",
-      "Buttons on P2/P3, encoder on INT0/1; BUS message A8 27 found on the real page; C0CE shown to be the AUX level"
+      "Buttons on P2/P3, encoder on INT0/1; BUS message A8 27 found on the real page; C0CE shown to be the AUX level",
+      "A8 0E 00 ramps C0CE up; AOUT plays a chord through panel keys, MOUT exactly 0, nothing forced"
     ],
     "blocked": []
   },
@@ -76,7 +77,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Find what sets DASP4 C0CE, the AUX level: walk System pages with keys and encoder",
+    "Find whether a real start-up sends A8 0E; what the constant 113 on AOUT is",
     "Explain A8 49 and A8 4A; fix the 4% CPU clock excess",
     "Fill the DSP cell column of the panel map",
     "Define the 1FC guard and the real noise sequence and level of secondary 34",
