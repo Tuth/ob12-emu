@@ -1046,3 +1046,45 @@ to 1 in program 4.
 
 Kept out of the patch: secondary 34, 0C-0E port writes, the DMEM ring and 2E lock delay, the 1FC
 guard. So the patched public emulator alone will not reproduce the OB-12's output.
+
+## Octave: note 60 at 130.8 Hz is the patch (measured)
+
+Not a fault. The pitch word is phase per sample over 2^24: note 3C gives 00B29A = 130.81 Hz,
+016534 = 261.62 Hz, 02CA69 = 523.25 Hz. So the Slave's tuning is exact, to the Hz shown here, and
+the octave comes from the timbre.
+
+- Osc 1 words are at C046, C05B, C070, with a paired value at C048 that halves as pitch doubles.
+  Osc 2 words are at C085, C09A, C0AF. Notes 24, 30, 3C, 48, 54, 60 give Osc 2 words 002C71,
+  0058E3, 00B1C7, 01638F, 02C71E, 058E3C: an exact doubling per octave.
+- OCT+ and OCT- send `A0 00 v`, starting from the timbre's first dump byte, 3E for the default
+  timbre. At the note, v = 40 writes C046 = 02CA69. So `A0 00` is Osc 1 Shift, 40 is the centre by
+  its stepping, and each step is one octave. The manual's range is two octaves each way.
+- The note number passes the Master unchanged: 94 3C 64 at every shift.
+- In the default timbre both oscillators sound near 130 Hz, so a shift of Osc 1 leaves the
+  fundamental in place. That is why autocorrelation did not move with OCT+.
+
+Factory timbres stepped with TIMBRE and the encoder, note 3C over MIDI:
+
+| Steps | First dump byte | Osc 1 word | Strongest lines (Hz) |
+|---|---|---|---|
+| boot default | 3E | not rewritten | 131, 392, 654 |
+| 1 | 3E | not rewritten | 131 |
+| 2 | 3E | not rewritten | 131, 262, 266, 654, 785 |
+| 3 | 3F | 016534 | 262, 264, 523, 528, 785 |
+| 4 | 3E | not rewritten | silent in the window, 0.7-1.9 s after the note |
+| 5 | 3F | 016534 | 262, 785 |
+| 6 or later | 3E | 02CA69 | 131, 392, 653, 915 |
+
+So factory sounds use 3E and 3F, and with 3F note 60 is 261.6 Hz. The boot sound simply is a
+3E timbre.
+
+Open:
+- Which steps past 5 were reached: the note came at 18.5 s, so runs with 8, 12 and 20 steps all
+  show the same timbre.
+- That last timbre: first byte 3E and word 523.25 Hz, yet the fundamental is 131 Hz with odd
+  lines. Not explained.
+- Step 4 being silent: a slow attack is likely, not checked.
+- Boot reads "Default Prg" and "Default Tmb". Whether a real unit starts on these is unknown.
+- The value of 40 as the panel's zero comes from the stepping, not from a display. If 40 is zero,
+  factory timbres sit one or two octaves down, which seems a lot. The font is missing, so the
+  display can't confirm it.

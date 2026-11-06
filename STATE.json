@@ -66,7 +66,8 @@
       "A8 0E 00 ramps C0CE up; AOUT plays a chord through panel keys, MOUT exactly 0, nothing forced",
       "Core regression: current core with options off equals the core proved against the public emulator, 71.68M steps",
       "Direct core_compare against public emulator 70357c3: 81.92M steps identical, options off, also with live CMEM",
-      "PR draft and patch ready, verified 81.92M steps against own core with options on; not sent"
+      "PR draft and patch ready, verified 81.92M steps against own core with options on; not sent",
+      "Note 60 octave explained: timbre Osc 1 Shift, A0 00; tuning exact, 3F timbre plays 261.6 Hz"
     ],
     "blocked": []
   },
@@ -81,11 +82,12 @@
   },
   "audit_queue": [
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
+    "Later, at Thor's request: measure performance, own core against Prehistoricman core",
+    "Find what D0A4, D061 near Nyquist are; explain the factory timbre with word 523 Hz and fundamental 131 Hz",
     "Find whether a real start-up sends A8 0E; what the constant 113 on AOUT is",
     "Explain A8 49 and A8 4A; fix the 4% CPU clock excess",
     "Fill the DSP cell column of the panel map",
     "Define the 1FC guard and the real noise sequence and level of secondary 34",
-    "Find why note 60 sounds at C3, and what D0A4, D061 near Nyquist are",
     "Measure channels, timbres and pitch again after the mode fix",
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
@@ -94,8 +96,7 @@
     "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
     "Identify Slave reset entry and interrupt vector handling",
-    "Reverse the Slave host-bus writes to derive PLD behaviour",
-    "Measure note 60 alone: direct runs may have played other notes, 196 Hz is unproven"
+    "Reverse the Slave host-bus writes to derive PLD behaviour"
   ],
   "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?",
   "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware."
