@@ -190,6 +190,7 @@ public:
         update_irq();
     }
 
+    Uart& link() { return uart[2]; }
     // Test input: queue bytes on the MIDI input.
     void midi_in(const std::vector<u8>& bytes) { uart[1].rx_queue.insert(uart[1].rx_queue.end(), bytes.begin(), bytes.end()); }
     // Test input: raise external interrupts periodically.
@@ -503,6 +504,7 @@ private:
     std::map<int, long> vectors;
 };
 
+#ifndef OB12_NO_MAIN
 int main(int argc, char** argv) {
     if (argc < 3) { puts("usage: ob12_master <rom dir> <instructions> [lcd.pbm]"); return 2; }
     auto* cpu = new Master();
@@ -537,3 +539,4 @@ int main(int argc, char** argv) {
     cpu->save_ram("build/ram.bin");
     return 0;
 }
+#endif

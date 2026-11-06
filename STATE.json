@@ -34,7 +34,7 @@
     "run_slave_pass": "no STOP line; UART2 Master shows 11 and the version text"
   },
   "status": {
-    "phase": "Slave firmware runs on a stub boot, loads DSP programs and answers the Master; CPUs not yet linked live, DSPs not attached",
+    "phase": "First sound: sawtooth on the voice bus with notes sent straight to the Slave; DASP4 output silent; Master does not forward MIDI notes yet",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -44,7 +44,8 @@
       "Chain test: summing bus and LFO bus reach DASP4 inputs bit-exact",
       "Master boot on vendored F2MC-16 core: 300M instructions, 9-task RTOS, splash on LCD, FE every 300 ms",
       "Master main screen and 849 bytes to the Slave after loading presets, 29F800 model, CALLP fix",
-      "Slave boot: banner, 849-byte Master stream consumed, 18-byte version reply, DSP load stream matches carved PMEM"
+      "Slave boot: banner, 849-byte Master stream consumed, 18-byte version reply, DSP load stream matches carved PMEM",
+      "Whole instrument linked; 12 voices allocated 3 per DSP; 196 Hz sawtooth captured from the voice bus"
     ],
     "blocked": []
   },
@@ -52,14 +53,15 @@
     "note": "Judgement, not measurement. Revise after each milestone.",
     "master_boots_to_lcd": 0.99,
     "slave_runs_dsps_loaded": 0.9,
-    "first_real_sound": 0.8,
-    "recognisable_playable": 0.75,
+    "first_real_sound": 0.97,
+    "recognisable_playable": 0.8,
     "realtime_vst3_if_sounding": 0.8,
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Link Master and Slave live over UART2 in one process",
-    "Decode runtime host commands and drive the five TMS57070 models from the Slave stream",
+    "Make DASP4 pass audio to MOUT: implement missing opcodes, then trace 060-06F",
+    "Find why the Master does not forward MIDI notes to the Slave",
+    "Explain 196 Hz for note 60, the rising level and silent channel 0",
     "Identify the ISR at FC0300 and what raises it",
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",

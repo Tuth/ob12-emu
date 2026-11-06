@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <unordered_map>
 
@@ -62,6 +63,9 @@ public:
         poke_vector_reset(0xfff000);
         for (u32 address : {0xffd3a0u, 0xffd215u, 0xffd12eu, 0xffd1bdu}) flash[address - 0xfc0000] = 0x66;  // RETP
     }
+    Uart& link() { return uart[2]; }
+    std::function<void(u8, u8)> on_dsp_byte;   // selected mask, data
+    std::function<void()> on_dsp_select;       // NDCS changed
     void feed(const std::vector<u8>& bytes) { uart[2].rx_queue.insert(uart[2].rx_queue.end(), bytes.begin(), bytes.end()); }
 
     u8 read_byte(u32 address) override {
@@ -221,6 +225,7 @@ private:
         for (int chip = 0; chip < 5; chip++)
             if (selected & (1 << chip)) dsp_stream[chip].push_back(data);
         if (!selected) unselected_bytes++;
+        if (on_dsp_byte) on_dsp_byte(selected, data);
     }
 
     u8 io_read(u32 address) {
@@ -267,6 +272,10 @@ private:
         case 0x29: io[address] &= data; break;
         case 0xa1: io[address] = (data & 0xbf) | (data & 0x04 ? 0x40 : 0); break;
         case 0xa9: io[address] = (data & ~0x08) | (data & io[address] & 0x08); break;
+        case 0x07:
+            if (((io[address] ^ data) & 0x1f) && on_dsp_select) on_dsp_select();
+            io[address] = data;
+            break;
         default: io[address] = data; break;
         }
     }
@@ -297,6 +306,7 @@ private:
     std::string text;
 };
 
+#ifndef OB12_NO_MAIN
 int main(int argc, char** argv) {
     if (argc < 3) { puts("usage: ob12_slave <rom dir> <instructions> [master stream]"); return 2; }
     auto* cpu = new Slave();
@@ -318,3 +328,4 @@ int main(int argc, char** argv) {
     cpu->save_hot("build/hot_slave.txt");
     return 0;
 }
+#endif

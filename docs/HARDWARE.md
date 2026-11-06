@@ -172,6 +172,29 @@ DSP host protocol, read from FC2690-FC2790 and checked against the captured stre
 - DASP4 stream keeps growing (49160 bytes) as the loop runs: runtime CMEM updates, format
   not read yet.
 
+## Whole instrument, `tools/tms_harness/ob12_system.cpp` (measured)
+
+Master, Slave and five DSP models in one process, UART2 linked live, stable for 30 s
+emulated. The Master sends 849 bytes and the Slave answers `Dec 11 2000 1.11` at about 12 s.
+
+Runtime host protocol, decoded and in use: `03` then 5-byte groups, 9-bit CMEM address and
+24-bit value, ended by NDCS changing. Load: `0C` + 12 + 2048, then `05` + 1536.
+
+**First sound.** Note-on bytes injected straight into the Slave, bypassing the Master:
+- Voices are allocated three per DSP: 8 notes went 3, 3, 2 to DASP0, 1, 2. So 12 voices.
+- About 50 CMEM writes per note.
+- The voice bus into DASP4 carries a sawtooth: 196.0 Hz with harmonics 1, 1/2, 1/3, 1/4,
+  1/5, 1/6. Signal is on the left channel of the odd half-frame slot only.
+
+Not understood or not working:
+- Note 60 sounds at 196 Hz, not 261.6 Hz. Patch transposition or a fault, unknown.
+- Level keeps rising for as long as notes hold, with no note-off sent. Unexplained.
+- Channel 0 alone gave silence; the signal appears with the next channels.
+- A MIDI note sent to the Master is received but not forwarded to the Slave.
+- DASP4 outputs stay silent, so nothing reaches MOUT or AOUT.
+- Secondary 0x34 is a noise generator per the public IDA module, 3 uses per voice DSP.
+  It, 1FC, 0x3E flag 8 and 0x43 MACLO remain unimplemented in the local emulator.
+
 ## Tooling and licences
 
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some
