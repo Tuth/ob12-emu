@@ -6,6 +6,7 @@
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
 //   OB12_PHASE=0|1   start DASP4 on the even or odd half frame (default 1)
 //   OB12_1FC=1       enable the 1FC divide step
+//   OB12_POT_SWEEP=t move all pots from t seconds on
 //   OB12_FORCE_GAIN=1  diagnostic: force DASP4 output gains C00D, C00F, C0CB
 #include "emu.h"
 #include "f2mc16.h"
@@ -112,6 +113,7 @@ int main(int argc, char** argv) {
     options.divide_1fc = getenv("OB12_1FC") != nullptr;
 
     auto* m = new master::Master();
+    if (getenv("OB12_POT_SWEEP")) m->pot_sweep_from = atof(getenv("OB12_POT_SWEEP"));
     auto* s = new slave::Slave();
     m->load(rom);
     s->load(rom);
@@ -199,6 +201,12 @@ int main(int argc, char** argv) {
         printf("STOP: %s\n", error.what());
     }
     write_wav(wav, out);
+    {
+        std::ofstream link("build/live_master_to_slave.bin", std::ios::binary);
+        link.write((const char*)m->link().head.data(), m->link().head.size());
+    }
+    printf("DASP4 C00D %06X C00E %06X C00F %06X C010 %06X C077 %06X C0CB %06X\n", host[4].dsp->cmem[0xd] & 0xffffff, host[4].dsp->cmem[0xe] & 0xffffff,
+           host[4].dsp->cmem[0xf] & 0xffffff, host[4].dsp->cmem[0x10] & 0xffffff, host[4].dsp->cmem[0x77] & 0xffffff, host[4].dsp->cmem[0xcb] & 0xffffff);
     std::ofstream raw("build/voice_bus.raw", std::ios::binary);
     raw.write((const char*)bus.data(), bus.size() * 4);
     for (int n = 0; n < 5; n++) {

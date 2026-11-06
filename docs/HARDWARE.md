@@ -278,8 +278,16 @@ Open, in order:
 - Voice pitch re-measured in the corrected run: 196.0 Hz sawtooth, so that reading stands.
   Note 60 should be 261.6 Hz; the patch may transpose, unknown. Level still rises while held.
 
-Next lead, untested: the Master sends panel values only on change, and the harness A/D is
-constant. Sweeping the pots should make the Master send what it normally would.
+**Solved: the outputs needed panel values.** The Master sends them only on change, and the
+harness A/D was constant. With every pot moving from 14 s on (`OB12_POT_SWEEP`):
+- Master to Slave grows from 849 to 18069 bytes: `A0`, `A8`, `B0`, `E0` messages and
+  `F0 7F 30 04 01 00 5B F7`, about 1700 bytes per second.
+- CMEM writes rise: DASP4 8948 to 61751, DASP0 3 to 37524.
+- MOUT left carries the note: 196.0 Hz sawtooth, RMS about 200, peak 1397 of 32768, with no
+  forced coefficient. MOUT right and AOUT stay zero. Sound is present on the real output.
+- C00D, C00F stay 0 throughout, so they were never output gains.
+- Not measured: which pot drives which parameter. The sweep moves all at once, so the level
+  here is arbitrary and DASP0's output changes as parameters move.
 
 ## Tooling and licences
 
