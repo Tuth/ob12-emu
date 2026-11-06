@@ -83,6 +83,7 @@
   },
   "audit_queue": [
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
+    "Later, at Thor's request: model the analog output path, sheets 11-15; output is taken digitally from DASP4 AX2 today",
     "Live: test by ear with real MIDI; speed up the DSP core; WASAPI or plugin host for lower latency; stop spinning",
     "Later, at Thor's request: measure performance, own core against Prehistoricman core",
     "Find what D0A4, D061 near Nyquist are; explain the factory timbre with word 523 Hz and fundamental 131 Hz",
