@@ -531,7 +531,7 @@ Measured, no pots, voice bus:
 So key tracking and three voices work, and idle stays 0. Left and right slots read the same.
 
 Open:
-- MOUT is not clean yet. With OB12_POT_SWEEP=12 its flatness is 0.50-0.59, and the sweep sets
+- Superseded by "Pots are 8 bit". MOUT was not clean. With OB12_POT_SWEEP=12 its flatness is 0.50-0.59, and the sweep sets
   arbitrary parameters, so the cause is not separated from the patch values.
 - OB12_FORCE_GAIN puts full scale DC on MOUT while idle. The chord appears at 131, 165, 196 Hz
   but clipped. Those cells are not simply gain, or the value is wrong. Real panel start
