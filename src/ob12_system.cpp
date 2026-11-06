@@ -24,6 +24,11 @@
 //   OB12_SLAVE_TICK=n  Slave PPG tick every n half frames, default 96 = 1 ms, 0 turns it off
 //   OB12_KEYS=from:to:row:mask,...  hold panel keys, row and mask hex, active low
 //   OB12_ENC=t:detents,...  turn the data encoder
+//   OB12_SERIAL=1    run on one thread; diagnostics that look inside a step do this anyway
+//   OB12_LIVE=t      from t seconds on play MOUT on the sound card, paced by it
+//   OB12_LIVE_SILENT=1  same timing, zeros to the device
+//   OB12_LIVE_MS=n   buffer length in ms, default 10; OB12_LIVE_BUFFERS=n, default 6
+//   OB12_LIVE_MIDI=d  take notes from MIDI input device d; OB12_LIVE_MIDI=list prints them
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
 //   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
 //   OB12_POT_STEPS=t:channel:mux:value,...  one pot jumps at t seconds, value hex
@@ -33,7 +38,12 @@
 #include "f2mc16.h"
 #include "mb90611.h"
 #include "tms57070/tms57070.h"
+#include "live_io.h"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <immintrin.h>
+#include <thread>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -48,6 +58,15 @@ namespace master {
 namespace slave {
 #include "ob12_slave.cpp"
 }
+
+// A spinning gate: the caller opens it, every worker does its part once, the caller waits.
+struct Gate {
+    alignas(64) std::atomic<long> go{0};
+    alignas(64) std::atomic<int> left{0};
+    void open(int workers) { left.store(workers, std::memory_order_relaxed); go.fetch_add(1, std::memory_order_release); }
+    void wait() { while (left.load(std::memory_order_acquire)) _mm_pause(); }
+    void done() { left.fetch_sub(1, std::memory_order_release); }
+};
 
 // Host stream per chip: 0C header+PMEM, 05 CMEM, 03 then 5-byte address+value groups.
 struct Host {
@@ -195,10 +214,19 @@ int main(int argc, char** argv) {
     FILE* cell_probe = getenv("OB12_PORT_LOG") && getenv("OB12_AUX_TONE") ? fopen("build/cells4.raw", "wb") : nullptr;
     m->text_log = host_log;
     for (int n = 0; n < 5; n++) { host[n].log = host_log; host[n].chip = n; host[n].clock = &clock; }
-    s->on_dsp_byte = [&](u8 selected, u8 data) {
+    // While the DSPs run the next half frame's CPU slice is already going, so host bytes wait here.
+    // They reach the chips before those chips' next run, the same order as one thread would give.
+    bool hold_bytes = false;
+    std::vector<std::pair<u8, u8>> held;
+    auto host_byte = [&](u8 selected, u8 data) {
         for (int chip = 0; chip < 5; chip++) if (selected & (1 << chip)) host[chip].byte(data);
     };
-    s->on_dsp_select = [&]() { for (auto& h : host) h.deselect(); };
+    s->on_dsp_byte = [&](u8 selected, u8 data) {
+        if (hold_bytes) held.push_back({selected, data}); else host_byte(selected, data);
+    };
+    s->on_dsp_select = [&]() {
+        if (hold_bytes) held.push_back({0x80, 0}); else for (auto& h : host) h.deselect();
+    };
 
     size_t m_sent = 0, s_sent = 0;
     std::vector<int16_t> out;
@@ -306,6 +334,113 @@ int main(int argc, char** argv) {
     static double port_sum[5][3][2][2];  // chip, AX1-3, left/right, half frame
     long port_count[2] = {};
     try {
+        const int slice = 167;
+        bool threaded = !getenv("OB12_SERIAL") && !cell_log && !start_trace && watch_d.empty() && !getenv("OB12_WATCH_C") && !getenv("OB12_SLAVE_WIN");
+        long long chip_tsc[5] = {};
+        Gate cpu_gate, dsp_gate;
+        std::atomic<bool> stop_workers{false};
+        std::string worker_error;
+        std::vector<std::thread> workers;
+        if (threaded) {
+            m->lean = s->lean = true;
+            hold_bytes = true;
+            workers.emplace_back([&]() {
+                long seen = 0;
+                for (;;) {
+                    while (cpu_gate.go.load(std::memory_order_acquire) == seen) { if (stop_workers) return; _mm_pause(); }
+                    seen++;
+                    try { m->run(slice); m->tick(slice - m->cycles_left()); }
+                    catch (const std::exception& error) { worker_error = error.what(); }
+                    cpu_gate.done();
+                }
+            });
+            for (int n = 0; n < 5; n++) workers.emplace_back([&, n]() {
+                long seen = 0;
+                for (;;) {
+                    while (dsp_gate.go.load(std::memory_order_acquire) == seen) { if (stop_workers) return; _mm_pause(); }
+                    seen++;
+                    long long t0 = __rdtsc();
+                    if (host[n].running) for (int i = 0; i < 256; i++) host[n].dsp->step();
+                    chip_tsc[n] += __rdtsc() - t0;
+                    dsp_gate.done();
+                }
+            });
+        }
+        struct Joiner { std::atomic<bool>& stop; std::vector<std::thread>& list; ~Joiner() { stop = true; for (auto& t : list) t.join(); } } joiner{stop_workers, workers};
+        bool live_on = getenv("OB12_LIVE") != nullptr;
+        double live_from = live_on ? atof(getenv("OB12_LIVE")) : 0;
+        int live_ms = getenv("OB12_LIVE_MS") ? atoi(getenv("OB12_LIVE_MS")) : 10;
+        int live_buffers = getenv("OB12_LIVE_BUFFERS") ? atoi(getenv("OB12_LIVE_BUFFERS")) : 6;
+        std::vector<int16_t> live_block(live_ms * 48 * 2);
+        int live_fill = 0;
+        bool live_midi = false;
+        if (live_on) {
+            if (!live_audio_open(live_buffers, live_ms * 48, getenv("OB12_LIVE_SILENT") != nullptr)) throw std::runtime_error("no sound device");
+            printf("live: %d x %d ms buffers\n", live_buffers, live_ms);
+            if (const char* device = getenv("OB12_LIVE_MIDI")) {
+                if (!strcmp(device, "list")) { for (int d = 0; d < live_midi_devices(); d++) printf("MIDI in %d: %s\n", d, live_midi_name(d)); }
+                else {
+                    live_midi = live_midi_open(atoi(device));
+                    printf("MIDI in %s: %s\n", device, live_midi ? live_midi_name(atoi(device)) : "failed");
+                }
+            }
+            fflush(stdout);
+        }
+        auto post = [&](long k, double now) {
+            if (now >= note_at + 0.2) {
+                for (int n = 0; n < 5; n++) for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) {
+                    double v = host[n].dsp->ax[p][c];
+                    port_sum[n][p][c][k & 1] += v * v;
+                }
+                port_count[k & 1]++;
+            }
+            if (k & 1) {
+                auto* d = host[4].dsp;
+                int32_t v[4] = {d->ax[1][0], d->ax[1][1], d->ax[2][0], d->ax[2][1]};
+                for (int c = 0; c < 4; c++) sum[c] += (double)v[c] * v[c];
+                for (int n = 0; n < 5; n++) {
+                    int32_t v04 = abs(logical_d(host[n].dsp, 4));
+                    if (v04 > d04_peak[n]) d04_peak[n] = v04;
+                    double l = host[n].dsp->ax[1][0], r = host[n].dsp->ax[1][1];
+                    chip_sum[n] += l * l + r * r;
+                }
+                if (live_on) {
+                    if (k / 96000.0 >= live_from) {
+                        int a = v[0] >> 8, b = v[1] >> 8;
+                        live_block[live_fill++] = (int16_t)a;
+                        live_block[live_fill++] = (int16_t)b;
+                        if (live_fill == (int)live_block.size()) { live_audio_write(live_block.data()); live_fill = 0; }
+                    }
+                } else {
+                    out.push_back((int16_t)(v[0] >> 8));
+                    out.push_back((int16_t)(v[1] >> 8));
+                }
+                count++;
+            }
+            if (port_log) {
+                int32_t v[6];
+                for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) v[p * 2 + c] = host[4].dsp->ax[p][c];
+                fwrite(v, 4, 6, port_log);
+                if (cell_probe) { int32_t c[6]; int list[6] = {0x0b, 0x0f, 0xd0, 0xd1, 0x08, 0x17}; for (int i = 0; i < 6; i++) c[i] = logical_d(host[4].dsp, list[i]); fwrite(c, 4, 6, cell_probe); }
+            }
+            if (!live_on) {
+                bus.push_back(host[4].dsp->ar[0][0]);
+                bus.push_back(host[4].dsp->ar[0][1]);
+            }
+            if (k % 96000 == 95999) {
+                printf("t=%.0f M>S %zu S>M %zu host", (k + 1) / 96000.0, m_sent, s_sent);
+                for (auto& h : host) printf(" %ld/%ld%s", h.programs, h.updates, h.running ? "r" : "");
+                printf("; AX2 rms");
+                for (int n = 0; n < 5; n++) { printf(" %.0f", count ? sqrt(chip_sum[n] / count / 2) : 0); chip_sum[n] = 0; }
+                printf("; MOUT %.0f %.0f AOUT %.0f %.0f\n", sqrt(sum[0] / count), sqrt(sum[1] / count), sqrt(sum[2] / count), sqrt(sum[3] / count));
+                fflush(stdout);
+                sum[0] = sum[1] = sum[2] = sum[3] = 0;
+                count = 0;
+            }
+        };
+        long long spent[4] = {};  // cycles: Slave, wait for Master, wait for DSPs, post
+        long long tsc_start = __rdtsc();
+        auto wall_start = std::chrono::steady_clock::now();
         for (long k = 0; k < total; k++) {
             double now = k / 96000.0;
             clock = now;
@@ -320,6 +455,11 @@ int main(int argc, char** argv) {
             }
             m->pot_clock = now;
             if (slave_tick && k % slave_tick == 0) s->ppg_tick();
+            if (live_midi && k % 96 == 0) {
+                uint8_t bytes[64];
+                int n = live_midi_read(bytes, sizeof bytes);
+                if (n) m->midi_in(std::vector<u8>(bytes, bytes + n));
+            }
             for (auto& w : slave_windows) {
                 if (now >= w.from && now < w.to && !s->trace_file) s->trace_file = w.file;
                 else if (now >= w.to && s->trace_file == w.file) s->trace_file = nullptr;
@@ -349,9 +489,33 @@ int main(int argc, char** argv) {
                 s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)(0x90 | sent_notes), 0x3c, 0x64});
                 sent_notes++;
             }
-            const int slice = 167;
-            m->run(slice); m->tick(slice - m->cycles_left());
-            s->run(slice); s->tick(slice - s->cycles_left());
+            if (threaded) {
+                long long t0 = __rdtsc();
+                cpu_gate.open(1);
+                s->run(slice); s->tick(slice - s->cycles_left());
+                long long t1 = __rdtsc();
+                cpu_gate.wait();
+                long long t2 = __rdtsc();
+                spent[0] += t1 - t0;
+                spent[1] += t2 - t1;
+                if (!worker_error.empty()) throw std::runtime_error(worker_error);
+                if (k > 0) {
+                    long long t3 = __rdtsc();
+                    dsp_gate.wait();
+                    long long t4 = __rdtsc();
+                    post(k - 1, (k - 1) / 96000.0);
+                    spent[2] += t4 - t3;
+                    spent[3] += __rdtsc() - t4;
+                }
+                for (auto& b : held) {
+                    if (b.first == 0x80) { for (auto& h : host) h.deselect(); }
+                    else host_byte(b.first, b.second);
+                }
+                held.clear();
+            } else {
+                m->run(slice); m->tick(slice - m->cycles_left());
+                s->run(slice); s->tick(slice - s->cycles_left());
+            }
             auto& mu = m->link();
             auto& su = s->link();
             for (; m_sent < mu.head.size(); m_sent++) {
@@ -388,6 +552,13 @@ int main(int argc, char** argv) {
             if (aout_left >= 0) { host[4].dsp->cmem[0x7f] = aout_left; host[4].dsp->cmem[0x80] = aout_right; }
             // Diagnostic only: DASP4 output gains the firmware has not been seen to write.
             if (force_gain) for (int index : {0x0d, 0x0f, 0xcb}) host[4].dsp->cmem[index] = 0x200000;
+            if (threaded) {
+                for (int n = 0; n < 5; n++) {
+                    Host& h = host[n];
+                    if (h.start_pending && ((k + (n == 4 ? phase : 0)) & 1) == 0) { h.start_pending = false; h.running = true; }
+                }
+                dsp_gate.open(5);
+            } else
             for (int n = 0; n < 5; n++) {
                 Host& h = host[n];
                 if (h.start_pending && ((k + (n == 4 ? phase : 0)) & 1) == 0) { h.start_pending = false; h.running = true; }
@@ -421,46 +592,25 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            if (now >= note_at + 0.2) {
-                for (int n = 0; n < 5; n++) for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) {
-                    double v = host[n].dsp->ax[p][c];
-                    port_sum[n][p][c][k & 1] += v * v;
-                }
-                port_count[k & 1]++;
-            }
-            if (k & 1) {
-                auto* d = host[4].dsp;
-                int32_t v[4] = {d->ax[1][0], d->ax[1][1], d->ax[2][0], d->ax[2][1]};
-                for (int c = 0; c < 4; c++) sum[c] += (double)v[c] * v[c];
-                for (int n = 0; n < 5; n++) {
-                    int32_t v04 = abs(logical_d(host[n].dsp, 4));
-                    if (v04 > d04_peak[n]) d04_peak[n] = v04;
-                    double l = host[n].dsp->ax[1][0], r = host[n].dsp->ax[1][1];
-                    chip_sum[n] += l * l + r * r;
-                }
-                out.push_back((int16_t)(v[0] >> 8));
-                out.push_back((int16_t)(v[1] >> 8));
-                count++;
-            }
-            if (port_log) {
-                int32_t v[6];
-                for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) v[p * 2 + c] = host[4].dsp->ax[p][c];
-                fwrite(v, 4, 6, port_log);
-                if (cell_probe) { int32_t c[6]; int list[6] = {0x0b, 0x0f, 0xd0, 0xd1, 0x08, 0x17}; for (int i = 0; i < 6; i++) c[i] = logical_d(host[4].dsp, list[i]); fwrite(c, 4, 6, cell_probe); }
-            }
-            bus.push_back(host[4].dsp->ar[0][0]);
-            bus.push_back(host[4].dsp->ar[0][1]);
-            if (k % 96000 == 95999) {
-                printf("t=%.0f M>S %zu S>M %zu host", (k + 1) / 96000.0, m_sent, s_sent);
-                for (auto& h : host) printf(" %ld/%ld%s", h.programs, h.updates, h.running ? "r" : "");
-                printf("; AX2 rms");
-                for (int n = 0; n < 5; n++) { printf(" %.0f", count ? sqrt(chip_sum[n] / count / 2) : 0); chip_sum[n] = 0; }
-                printf("; MOUT %.0f %.0f AOUT %.0f %.0f\n", sqrt(sum[0] / count), sqrt(sum[1] / count), sqrt(sum[2] / count), sqrt(sum[3] / count));
-                fflush(stdout);
-                sum[0] = sum[1] = sum[2] = sum[3] = 0;
-                count = 0;
-            }
+            if (threaded) continue;
+            post(k, now);
         }
+        if (threaded) {
+            dsp_gate.wait();
+            post(total - 1, (total - 1) / 96000.0);
+        }
+        double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
+        if (live_on) {
+            printf("live: %ld buffers, %ld underruns\n", live_audio_buffers_sent(), live_audio_underruns());
+            live_midi_close();
+            live_audio_close();
+        }
+        if (threaded) {
+            double all = (double)(__rdtsc() - tsc_start);
+            printf("time share: Slave %.1f%%, wait Master %.1f%%, wait DSP %.1f%%, post %.1f%%\n", 100 * spent[0] / all, 100 * spent[1] / all, 100 * spent[2] / all, 100 * spent[3] / all);
+            printf("chip busy:"); for (long long c : chip_tsc) printf(" %.1f%%", 100 * c / all); puts("");
+        }
+        printf("speed: %.2f s of sound in %.2f s, %.2f x real time, %s\n", total / 96000.0, wall, total / 96000.0 / wall, threaded ? "threads" : "serial");
     } catch (const std::exception& error) {
         printf("STOP: %s\n", error.what());
     }

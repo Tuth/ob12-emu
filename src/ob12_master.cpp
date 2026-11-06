@@ -195,6 +195,7 @@ public:
         s.last = data;
     }
 
+    bool lean = false;  // skip the per instruction statistics
     void tick(int cycles) {
         cycles_total += cycles;
         for (auto& t : timer) t.advance(cycles);
@@ -336,6 +337,7 @@ public:
 protected:
     void debugger_instruction_hook(u32 address) override {
         if (address < 0xe00000) fatalerror("PC left memory: %06X", address);
+        if (lean) { pc = address; steps++; return; }
         if (address == 0xf01c76 || address == 0xf00899) {
             char line[160];
             u32 sp = ob12_ssb() << 16 | ob12_ssp();

@@ -97,6 +97,7 @@ public:
 
     u32 watch_lo = 0, watch_hi = 0;  // study: print writes in this range
     FILE* trace_file = nullptr;  // study: PCs and RAM accesses
+    bool lean = false;  // skip the per instruction statistics
     void tick(int cycles) {
         cycles_total += cycles;
         for (auto& t : timer) t.advance(cycles);
@@ -158,6 +159,7 @@ public:
 protected:
     void debugger_instruction_hook(u32 address) override {
         if (address < 0xe00000) fatalerror("PC left memory: %06X", address);
+        if (lean && address != 0xffd3a0 && address != 0xffd215 && address != 0xffd12e && address != 0xffd1bd) { pc = address; steps++; return; }
         if (address == 0xffd3a0) debug_print();
         else if (address == 0xffd215 || address == 0xffd12e || address == 0xffd1bd) log_call(address);
         pc = address;

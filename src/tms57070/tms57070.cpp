@@ -92,7 +92,7 @@ uint32_t Core::dmem_index(uint32_t address) const {
     if (!flag(CR1, LDMEM)) {
         if (options.true_dmem_ring) {
             a &= size_mask;
-            if (a <= dcirc) a = (a + doff) % (dcirc + 1u);
+            if (a <= dcirc) { a += doff; if (a > dcirc) { a -= dcirc + 1u; if (a > dcirc) a %= dcirc + 1u; } }
             return a;
         }
         a = (a + doff) & 0xffff;

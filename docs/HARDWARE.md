@@ -1088,3 +1088,44 @@ Open:
 - The value of 40 as the panel's zero comes from the stepping, not from a display. If 40 is zero,
   factory timbres sit one or two octaves down, which seems a lot. The font is missing, so the
   display can't confirm it.
+
+## Real time (measured on Ryzen 9 5900X, 12 cores)
+
+Start: 16 s of sound took 53.8 s, 0.30 x real time, one thread.
+
+What changed:
+- Five DSPs on five threads, Master on a sixth, Slave on the main thread, with spinning gates.
+- Pipeline: the CPU slice of half frame k runs while the DSPs run k-1. The Slave never reads a DSP,
+  so this is safe. Its host bytes are held and applied before the chips' next run, in the same
+  order as one thread would. Diagnostics that look inside a step fall back to one thread.
+- `lean` skips the per instruction statistics of both CPUs. -O3, and no modulo in ring addressing.
+
+| Build | 16 s of sound | Speed | Output |
+|---|---|---|---|
+| One thread, before | 53.8 s | 0.30 x | reference |
+| Five DSP and two CPU threads | 16.9 s | 0.95 x | identical |
+| CPUs overlapped with DSPs | 13.6 s | 1.18 x | identical |
+| Same, final build, idle machine | 10.5 s | 1.52 x | identical |
+
+"Identical" is the MD5 of the WAV of a three note run: 103e1c0e43f53d2b2255779eacd1011a. Speed
+varies with what else runs on the machine: the same code measured between 1.13 and 1.53.
+
+The DSPs are the limit: each chip is busy 60-87% of the time, about 7 us per 256 steps at the
+slower measurements. Spinning uses seven threads fully, so this is not yet plugin behaviour.
+
+Live mode, `src/live_io.cpp`, `OB12_LIVE`: MOUT to the sound card by waveOut, which also paces the
+emulator, and MIDI in. Boot runs flat out first. Silent test, same timing, 12 notes held:
+
+| Buffering | Underruns |
+|---|---|
+| 10 ms x 6 = 60 ms, the default | 0 of 2100 |
+| 10 ms x 4 = 40 ms | 0 of 1700 |
+| 5 ms x 8 = 40 ms | 0 of 3400 |
+| 5 ms x 4 = 20 ms | 372 of 4200 |
+| 3 ms x 4 = 12 ms | 1737 of 7000 |
+
+Longest test: 34 s of live output, 8 notes, 0 underruns. Not tested: real sound through the
+speakers, notes from a real MIDI device, runs longer than a minute, a loaded machine. The 20 ms
+failure may be waveOut, not the emulator; WASAPI or a plugin host should tell.
+
+MOUT plays at full Master Volume, as pots at rest send nothing.
