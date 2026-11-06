@@ -562,7 +562,7 @@ With all pots at 80, now the default, no forced value, MOUT left and right:
 - C0CB reads 03513E at rest 80 and 000000 at rest 0, when MOUT was 0. Whether C0CB alone is the
   cause is not separated.
 - The chord reaches full scale on the left: 101 clipped samples of 67200. Right has none.
-- L/R ratio is about 1.57. Pan or patch, not measured. AOUT stays 0.
+- L/R ratio is about 1.57. It is already on the bus, see "AOUT and clipping". AOUT stays 0.
 - The real resting position of each pot is unknown. 80 is only a mid value.
 - The two half frames of MOUT carry the same word.
 
@@ -691,9 +691,59 @@ and no unimplemented word remains in the run. Idle stays exactly 0; note 3C and 
 unchanged. The bit sequence is an xorshift of mine, not the real one, and the noise level is
 unverified.
 
-Master Volume: pot 40 gives C0CB 0063C2 and RMS 319709; pots 80 and FF both give 03513E, so the
+Retracted in "AOUT and clipping": master Volume: pot 40 gives C0CB 0063C2 and RMS 319709; pots 80 and FF both give 03513E, so the
 upper half adds nothing here. Why is not known. So the left clipping on the chord happens at
 the highest volume.
 
 Tried and not useful: the Master read no name strings when pots moved, so the list at 35EAC is
 not used on the normal page. The text probe stays in `OB12_HOST_LOG`.
+
+## AOUT and clipping (measured)
+
+**Retraction.** "Pots 80 and FF both give 03513E, so the upper half adds nothing" was wrong. At
+rest the pot never moved, so no volume message was sent and C0CB kept its start-up value. The
+Master Volume curve, chord 3C, 40, 43, pot moved in steps:
+
+| Pot | Message value | C0CB | MOUT left RMS | Left peak | Clipped samples |
+|---|---|---|---|---|---|
+| 20 | 0E | 002DA2 | 168041 | 358329 | 0 |
+| 40 | 1F | 0063C2 | 411075 | 953698 | 0 |
+| 60 | 2F | 009AB9 | 685497 | 1528268 | 0 |
+| 7F | 3F | 00D44F | 877727 | 2097084 | 0 |
+| A0 | 51 | 011BB1 | 1123329 | 2802184 | 0 |
+| FF | 7F | 03513E | 3498107 | 8388531 | 40 |
+
+Clipping:
+- The voice bus does not clip: peak 6428567 left, 4378873 right on the same chord.
+- DASP4 raises the level by about 1.27 at C0CB 03513E (RMS 3601899 from 2840003), so the left
+  channel reaches full scale.
+- The harness starts at that highest value, because a pot at rest sends nothing. So the 101
+  clipped samples came from running at full Master Volume. No level below FF clipped.
+- Whether a real unit clips the same way at full volume is unknown.
+- L/R ratio is already on the bus, 1.47 at the peaks, so DASP4 does not cause it. Pan is the
+  candidate, not measured.
+
+AOUT:
+- The manual, p.74-75: a Part goes to one BUS, MAIN or AUX, and AUX outputs carry only AUX
+  Parts. So silence on AOUT is expected when every Part is on MAIN. This setup was not read from
+  the patch; it is inferred from the two points below.
+- Program 4 sends AX3 from the cells named by pointers C07F, C080. They are 00000B, 00000F in
+  the loaded CMEM and no host write changed them. No word addresses D00B or D00F directly, and
+  neither cell changed in a run with a note.
+- The bus has an empty slot, which reads into D0D0, D0D1 at 003, 005. The note is on the other
+  slot, D008, D00C. Four buses per sample fit the manual's four outputs. Inferred.
+
+The path works. Forcing the pointers (`OB12_AOUT_CELLS`):
+- 17, 18: AOUT copies MOUT, RMS 2756045 against 2756027, 131.1 Hz.
+- D0, D1 with a 440 Hz tone on the empty slot (`OB12_AUX_TONE`): AOUT carries 440.0 Hz, RMS
+  707106, flatness 0.000.
+That tone did not appear among the strong lines of MOUT. D0D0 is read at 059, 05A; what those
+words do with it is not traced.
+
+Not found: which message sets the BUS. Sending `A0`, `A4`, `A8` n 03 for all n, and
+`F0 7F 30 04 p 00 40` for p 0-1F, gave no AOUT. Changing each byte of `F0 7E 04` to 03 and
+retriggering the note gave none either, but that run lost all sound from byte 20 on, so bytes
+20-55 are untested.
+
+Probes added: `OB12_SLAVE_SEQ`, `OB12_SLAVE_FILE`, `OB12_AUX_TONE`, `OB12_AOUT_CELLS`,
+`OB12_CELL_WRITERS`.

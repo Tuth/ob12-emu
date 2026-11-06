@@ -17,6 +17,10 @@
 //   OB12_EARLY_MODE=1  apply secondaries 28-2B before the primary, as the public emulator does
 //   OB12_POT_SWEEP=t move all pots from t seconds on
 //   OB12_FORCE_GAIN=1  old diagnostic, not needed: forces DASP4 cells C00D, C00F, C0CB
+//   OB12_SLAVE_SEQ=t,step,status,value  send status n value to the Slave for n = 0..127, hex
+//   OB12_SLAVE_FILE=f  lines of seconds and hex bytes, sent straight to the Slave
+//   OB12_AUX_TONE=1  put a test tone on the even bus slot into DASP4 from the note time
+//   OB12_AOUT_CELLS=l,r  study: force the AOUT pointers C07F, C080, hex
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
 //   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
 //   OB12_POT_STEPS=t:channel:mux:value,...  one pot jumps at t seconds, value hex
@@ -177,6 +181,7 @@ int main(int argc, char** argv) {
     double clock = 0;
     FILE* host_log = getenv("OB12_HOST_LOG") ? fopen(getenv("OB12_HOST_LOG"), "w") : nullptr;
     FILE* port_log = getenv("OB12_PORT_LOG") ? fopen("build/ports.raw", "wb") : nullptr;
+    FILE* cell_probe = getenv("OB12_PORT_LOG") && getenv("OB12_AUX_TONE") ? fopen("build/cells4.raw", "wb") : nullptr;
     m->text_log = host_log;
     for (int n = 0; n < 5; n++) { host[n].log = host_log; host[n].chip = n; host[n].clock = &clock; }
     s->on_dsp_byte = [&](u8 selected, u8 data) {
@@ -203,6 +208,33 @@ int main(int argc, char** argv) {
         }
     }
     int32_t d04_peak[5] = {};
+    // Study: send status, n, value straight to the Slave for n = 0..127.
+    int seq_status = 0, seq_value = 0, seq_next = 0;
+    double seq_from = 0, seq_step = 0;
+    if (const char* text = getenv("OB12_SLAVE_SEQ")) sscanf(text, "%lf,%lf,%x,%x", &seq_from, &seq_step, &seq_status, &seq_value);
+    // Study: a file of lines "seconds hex hex ...", sent straight to the Slave.
+    std::vector<std::pair<double, std::vector<u8>>> script;
+    size_t next_script = 0;
+    if (const char* name = getenv("OB12_SLAVE_FILE")) {
+        std::ifstream file(name);
+        std::string line;
+        while (std::getline(file, line)) {
+            char* cursor = nullptr;
+            double at = strtod(line.c_str(), &cursor);
+            std::vector<u8> bytes;
+            for (;;) {
+                char* end = nullptr;
+                long value = strtol(cursor, &end, 16);
+                if (end == cursor) break;
+                bytes.push_back((u8)value);
+                cursor = end;
+            }
+            script.push_back({at, bytes});
+        }
+    }
+    bool aux_tone = getenv("OB12_AUX_TONE") != nullptr;
+    int aout_left = -1, aout_right = -1;  // study: point AOUT at other DMEM cells
+    if (const char* text = getenv("OB12_AOUT_CELLS")) sscanf(text, "%x,%x", &aout_left, &aout_right);
     int hop = getenv("OB12_HOP") ? atoi(getenv("OB12_HOP")) : 2;
     static int32_t wire[4][5][3][2];
     int watch = getenv("OB12_WATCH_C") ? strtol(getenv("OB12_WATCH_C"), nullptr, 16) : 0;
@@ -243,6 +275,14 @@ int main(int argc, char** argv) {
                 s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)(0x90 | note_channel), 0x3c, 0x64});
                 note_sent = true;
             }
+            while (next_script < script.size() && now >= script[next_script].first) {
+                auto& bytes = script[next_script++].second;
+                s->link().rx_queue.insert(s->link().rx_queue.end(), bytes.begin(), bytes.end());
+            }
+            if (seq_status && seq_next < 128 && now >= seq_from + seq_next * seq_step) {
+                s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)seq_status, (u8)seq_next, (u8)seq_value});
+                seq_next++;
+            }
             if (sent_notes < direct && now >= note_at + sent_notes) {
                 s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)(0x90 | sent_notes), 0x3c, 0x64});
                 sent_notes++;
@@ -279,6 +319,10 @@ int main(int argc, char** argv) {
                     host[n].dsp->ar[1][c] = wire[from][n - 1][2][c];
                 }
             }
+            // Study: a 440 Hz tone on the empty bus slot, into DASP4 only.
+            if (aux_tone && (k & 1) == 0 && now >= note_at) for (int c = 0; c < 2; c++)
+                host[4].dsp->ar[0][c] = (int32_t)(1000000 * sin(now * 440 * 6.283185307));
+            if (aout_left >= 0) { host[4].dsp->cmem[0x7f] = aout_left; host[4].dsp->cmem[0x80] = aout_right; }
             // Diagnostic only: DASP4 output gains the firmware has not been seen to write.
             if (force_gain) for (int index : {0x0d, 0x0f, 0xcb}) host[4].dsp->cmem[index] = 0x200000;
             for (int n = 0; n < 5; n++) {
@@ -339,6 +383,7 @@ int main(int argc, char** argv) {
                 int32_t v[6];
                 for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) v[p * 2 + c] = host[4].dsp->ax[p][c];
                 fwrite(v, 4, 6, port_log);
+                if (cell_probe) { int32_t c[6]; int list[6] = {0x0b, 0x0f, 0xd0, 0xd1, 0x08, 0x17}; for (int i = 0; i < 6; i++) c[i] = logical_d(host[4].dsp, list[i]); fwrite(c, 4, 6, cell_probe); }
             }
             bus.push_back(host[4].dsp->ar[0][0]);
             bus.push_back(host[4].dsp->ar[0][1]);
@@ -401,6 +446,27 @@ int main(int argc, char** argv) {
         for (int n = 0; n < 5; n++) for (int a = 0; a < 512; a++) {
             snprintf(text, sizeof text, "%d %03X %06X %06X\n", n, a, a < 256 ? logical_d(host[n].dsp, a) & 0xffffff : 0, host[n].dsp->cmem[a] & 0xffffff);
             dump << text;
+        }
+    }
+    if (const char* list = getenv("OB12_CELL_WRITERS")) {  // chip,cell,cell in hex: who changes these logical cells
+        int chip = (int)strtol(list, nullptr, 16);
+        std::vector<int> cells;
+        for (const char* c = strchr(list, ','); c; c = strchr(c + 1, ',')) cells.push_back((int)strtol(c + 1, nullptr, 16));
+        tms::Core* d = host[chip].dsp;
+        std::map<int, std::map<int, long>> writers;
+        for (int i = 0; i < 512 * 64; i++) {
+            int pc = d->pc;
+            std::vector<int32_t> before;
+            uint16_t off = d->doff;
+            for (int c : cells) before.push_back(logical_d(d, c));
+            d->step();
+            if (d->doff == off) for (size_t j = 0; j < cells.size(); j++)
+                if (logical_d(d, cells[j]) != before[j]) writers[cells[j]][pc]++;
+        }
+        for (int c : cells) {
+            printf("D%03X now %06X writers:", c, logical_d(d, c) & 0xffffff);
+            for (auto& w : writers[c]) printf(" %03X x%ld", w.first, w.second);
+            puts("");
         }
     }
     if (const char* trace = getenv("OB12_VOICE_TRACE")) {  // chip,first,last in hex
