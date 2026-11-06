@@ -80,7 +80,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "PR: waits for Thor to approve docs/PR-TMS57070.md and the patch",
+    "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
     "Find whether a real start-up sends A8 0E; what the constant 113 on AOUT is",
     "Explain A8 49 and A8 4A; fix the 4% CPU clock excess",
     "Fill the DSP cell column of the panel map",
