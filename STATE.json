@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Thin VST3 and standalone player on one engine and one Direct2D panel; validator 47 of 47; not yet tried in a DAW",
+    "phase": "Display reads clearly with a replacement font; thin VST3 and player working; CPU use next",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -71,7 +71,8 @@
       "Threads and pipeline: 0.30 x to 1.52 x real time, bit identical; OB12_LIVE plays through waveOut with MIDI in",
       "First live play by Thor: loud, notes and scale correct through MIDI",
       "Engine library bit identical; vector panel; player; VST3 passes the Steinberg validator and plays through process()",
-      "First DAW-free play by Thor through the plugin: presets sound sensible. Own core 15-20% faster than public on the main programs"
+      "First DAW-free play by Thor through the plugin: presets sound sensible. Own core 15-20% faster than public on the main programs",
+      "Font format found; replacement sector built; firmware screens readable in the panel"
     ],
     "blocked": []
   },
@@ -86,7 +87,7 @@
   },
   "audit_queue": [
     "CPU use: replace spinning with something a host can live with; speed up step()",
-    "Font: Thor misses it now. Find or rebuild the FF0000 sector, or draw text from the Master strings",
+    "Font polish: selected rows, real font sizes per number, glyphs above 7F, or a real flash dump",
     "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
     "Later, at Thor's request: model the analog output path, sheets 11-15; output is taken digitally from DASP4 AX2 today",
@@ -97,7 +98,6 @@
     "Fill the DSP cell column of the panel map",
     "Define the 1FC guard and the real noise sequence and level of secondary 34",
     "Measure channels, timbres and pitch again after the mode fix",
-    "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
     "Explain secondary 0x38",
     "Explain interrupts: 192 fired then stopped, no return path observed",

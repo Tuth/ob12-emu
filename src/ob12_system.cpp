@@ -690,6 +690,7 @@ int main(int argc, char** argv) {
     for (auto& entry : s->iostat) printf("slave io %02X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
     printf("slave vectors:"); for (auto& entry : s->vectors) printf(" %02X x%ld", entry.first, entry.second); printf(" ENIR %02X EIRR %02X ELVR %02X %02X TBTC %02X", s->io[0x28], s->io[0x29], s->io[0x2a], s->io[0x2b], s->io[0xa9]); puts("");
     for (auto& entry : m->iostat) if (entry.first < 0x12 || (entry.first >= 0x28 && entry.first < 0x30)) printf("master io %02X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
+    printf("font ids:"); for (int i = 0; i < 64; i++) if (m->font_reads[i]) printf(" %d x%ld", i, m->font_reads[i]); puts("");
     printf("key reads:"); for (long r : m->key_reads) printf(" %ld", r); puts("");
     m->lcd.save_pbm("build/lcd.pbm");
     m->save_hot("build/hot.txt");

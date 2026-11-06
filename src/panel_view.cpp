@@ -190,7 +190,7 @@ struct PanelView::Impl {
             static uint32_t pixels[240 * 64];
             for (int y = 0; y < 64; y++) for (int x = 0; x < 240; x++) {
                 bool on = lcd_bits[y * 30 + (x >> 3)] & (0x80 >> (x & 7));
-                pixels[y * 240 + x] = on ? 0xff10203a : 0xffb9c8d8;
+                pixels[y * 240 + x] = on ? 0xffc4d2de : 0xff10203a;  // a set bit is background
             }
             lcd->CopyFromMemory(nullptr, pixels, 240 * 4);
             target->DrawBitmap(lcd, D2D1::RectF(panel_lcd_x0 * s, panel_lcd_y0 * s, panel_lcd_x1 * s, panel_lcd_y1 * s), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);

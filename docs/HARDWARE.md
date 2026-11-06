@@ -1188,3 +1188,33 @@ short programs 5 and 9 only run at start-up. A chip has 10.4 us per half frame: 
 about 5.2 us with the own core and 6.2 us with the public one, so both would fit.
 Not measured: the public emulator inside the instrument, which would also need its missing
 behaviours. Timing is a loop over step() with no hooks, so a plugin run adds gate waits on top.
+
+## Font and display (measured)
+
+The sector at FF0000 is still missing, but its format is now read from F0851F, F08565 and F086E9.
+`tools/make_font.py` builds a replacement, `rom/font_sector.bin`, loaded at FF0000 if present.
+
+Format: u32 offsets per font at FF0002, relative to FF0002, indexed by font number. From a font's
+base: +12 first char, +14 char count, +16 row width in words, +18 height, +1C advance, +1E offset
+of a u16 column table, +20 offset of the bitmap. A glyph spans columns table[i] to table[i+1].
+Column x is bit 15 - (x & 15) of little endian word x >> 4, by the mask table in RAM at 390C, read
+from a RAM dump: 8000 down to 0001.
+
+Glyphs are drawn from DejaVu Sans Mono, 6 x 8, not the original font. All 16 font numbers point at
+this one font. Font 6 is passed as a literal; the others come packed from screen data, and which
+ones exist is not known: the read counter I tried is polluted by header reads from the blank sector.
+
+With it the firmware's own screens read clearly: PLAY PROGRAM, EDIT PROGRAM MENU, EDIT TIMBRE MENU,
+BUS SETTINGS with its drawing of the part and outputs. A set bit is background, so the panel
+draws set bits light.
+
+**Correction.** The boot sound is not a "Default" patch: the screen shows program A-001, "08 Fat
+Pad", timbre A-106. "Default Prg" and "Default Tmb" are read at boot, but that is not what plays.
+
+The sound changed by a timing shift only, not in kind. With the font the Master spends other time
+drawing, so from the first note the WAV differs from the old reference: new MD5
+17c551a0a8e1d2eeef7d49160f9b9c1a, the same in `ob12_system` and the engine, RMS 10130 against 10121.
+The old hash holds only without `rom/font_sector.bin`.
+
+Open: selected rows look heavy and some of their letters merge; zero is drawn as an O; the
+original font's sizes and shapes are unknown; characters above 7F have no glyphs.

@@ -124,6 +124,8 @@ public:
         place(rom + "/boot_152-emergency-boot.bin", 0xfc000);
         place(rom + "/presets/12tmbFS.bin", 0xc0000);
         place(rom + "/presets/12prgFS.bin", 0xd0000);
+        // The font sector is not among the supplied files. tools/make_font.py builds a replacement.
+        if (std::ifstream(rom + "/font_sector.bin").good()) place(rom + "/font_sector.bin", 0xf0000);
     }
 
     // Test probe: runs of printable bytes read from ascending flash addresses, for what the panel shows.
@@ -163,6 +165,7 @@ public:
                 Stat& s = touch(blank, address & 0xfff000);
                 s.reads++;
             }
+            if (address >= 0xff0002 && address < 0xff0102) font_reads[(address - 0xff0002) / 4]++;
             if (text_log) note_text(address, flash[address - 0xf00000]);
             return flash[address - 0xf00000];
         }
@@ -201,6 +204,7 @@ public:
         s.last = data;
     }
 
+    long font_reads[64] = {};  // which fonts the firmware asks for
     bool lean = false;  // skip the per instruction statistics
     void tick(int cycles) {
         cycles_total += cycles;
