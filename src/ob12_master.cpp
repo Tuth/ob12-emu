@@ -77,6 +77,11 @@ public:
             }
         }
     }
+    bool bitmap(u8* out) const {  // 240 x 64, 30 bytes a row
+        if (graphic_area != 30) return false;
+        for (int row = 0; row < 64; row++) for (int i = 0; i < 30; i++) out[row * 30 + i] = vram[(u16)(graphic_home + row * 30 + i)];
+        return true;
+    }
     void save_pbm(const std::string& path) const {
         if (!graphic_area) return;
         std::ofstream file(path, std::ios::binary);
@@ -102,6 +107,7 @@ public:
         flash.assign(0x100000, 0xff);
         ram.assign(0x40000, 0);
         memset(internal, 0, sizeof internal);
+        memset(pot_live, 0xff, sizeof pot_live);
         memset(io, 0, sizeof io);
         io[0xa1] = 0xfb;  // CKSCR reset value
         for (int i = 0xb0; i < 0xc0; i++) io[i] = 7;  // ICR: interrupts disabled
@@ -225,9 +231,11 @@ public:
     struct KeyStep { double from, to; int row; u8 mask; };
     std::vector<KeyStep> key_steps;  // test input: a key held between two times
     long key_reads[16] = {};
+    u8 key_live[16] = {};        // live input: keys held now
+    short pot_live[8][8];        // live input: pot values, -1 when never moved
     u8 key_value(int row) {
         key_reads[row]++;
-        u8 value = 0xff;
+        u8 value = (u8)~key_live[row];
         for (auto& k : key_steps) if (k.row == row && pot_clock >= k.from && pot_clock < k.to) value &= ~k.mask;
         return value;
     }
@@ -247,6 +255,7 @@ public:
         int channel = (adc_channel - 1) & 7;
         int mux = io[0x05] & 7;  // POTA[2:0], sheet 02/15
         u16 stepped = pot_rest;
+        if (pot_live[channel][mux] >= 0) return (u16)pot_live[channel][mux];
         for (auto& step : pot_steps) if (now >= step.at && step.channel == channel && step.mux == mux) stepped = step.value;
         if (pot_sweep_from <= 0 || now < pot_sweep_from) return stepped;
         if (pot_sweep_to > 0 && now > pot_sweep_to) now = pot_sweep_to;
