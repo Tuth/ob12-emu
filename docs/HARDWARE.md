@@ -258,7 +258,8 @@ Options on in the system: audio ports, true ring, 2E lock delay, MACLO multiply.
 Open, in order:
 - MOUT and AOUT are silent even with notes, in both DASP4 phases. The voice bus into DASP4
   carries signal on left, odd half frames, rising to RMS 111015. Right is zero. Phase 1 puts
-  that slot on D0D0; phase 0 puts it on D08, which goes nowhere. Phase 1 is the default.
+  that slot on D0D0; phase 0 puts it on D08. Superseded by "Two-slot audio bus": phase 0
+  is the default and D08 does reach the output.
 - The gain path needs finding: C77 and other coefficients are zero. They may come from a
   Master message not yet sent, for example panel or volume values.
 - Unimplemented and hit every sample: 1FC, 3E flag 8, secondary 34.
@@ -299,22 +300,81 @@ harness A/D was constant. With every pot moving from 14 s on (`OB12_POT_SWEEP`):
   passed is not measured, though channel 0 was sent first and writes began at once.
 - Master turns MIDI channel into Slave channel 4. DASP0 then takes the voice: CMEM writes rise
   from 3 to 37091.
-- That note is silent: voice output stays near 0, MOUT 0. With notes sent direct, channel 0
-  alone was silent too, and channels 1 and 2 sounded.
+- That note is silent: voice output and MOUT measure 0. Still true with the bus fixed below,
+  and it is not explained by the timbre: the same note sent direct on channel 4 sounds.
 
 Silent timbre study:
 - The Master loads four timbres, `F0 7E 00..03`, and program data `F0 7E 04`.
 - `tools/compare_channels.py`: Slave channel 4 writes the same values as channel 0. So the
-  Master plays timbre 0, and timbre 0 is the silent one. Timbres 1 and 2 differ in about 30
-  CMEM values, for example C014, C04B, C087.
+  Master plays timbre 0. Timbres 1 and 2 differ in about 30 CMEM values, for example C014,
+  C04B, C087. **Retracted:** timbre 0 is not silent, see "Two-slot audio bus" below.
 - Noise hypothesis tested and rejected: enabling secondary 34 changed nothing.
 - Voice code runs two divides of 16 steps by D04: 1F8 then 15 x 1FC, at 046 and 059.
 - 1FC with a zero divisor made idle voices output DC, so a guard treats divisor 0 as no
-  subtract. This guard is a hypothesis. For timbre 0, D04 stays 0, so no sound.
+  subtract. This guard is a hypothesis.
 - With 1FC on, direct notes: the level is now steady, RMS 160510 on the bus instead of rising,
   so the rise was caused by the missing division. A second bus slot carries signal, RMS
   about 150000. Spectrum changed: 392 Hz strongest, 196 Hz at 0.36. 1FC is on by default.
-- Right channel still zero. Why D04 stays 0 for timbre 0 is the open question.
+- Right channel still zero.
+
+## Two-slot audio bus (measured)
+
+**Retraction.** "Timbre 0 keeps D04 at 0" was an inference and it is false. Measured live on
+DASP0, D04 peaks at 00F755 for timbre 0. Reading `dmem[4]` is also wrong: D04 is cell
+`(4 + DOFF) mod (DCIRC + 1)`. Replaying `dsp_stream_N.bin` alone gave DCIRC 0 and wrong CMEM,
+so that replay is not a valid measurement; the probes now run inside `ob12_system`.
+
+What D04 is: a scratch divisor, rewritten several times per sample. In one traced sample:
+- 03D stores M1: 000061 for timbre 0, 000000 for timbre 1.
+- 039 reads C04B into M0 as 00003C, 03C shifts it to 00000F, 040 stores that in D04.
+- 046 clears it.
+
+C04B is a mailbox: the host writes it, and 03A overwrites it with 00000F within a sample
+(`OB12_WATCH_C=4B`). The program serves one table slot at a time: 020 loads CA from ACC, 44 in
+the traced sample and 45 in the first. So the trace covers one slot only.
+
+C04A: the DSP's first pass stores 0 over the loaded 02200E, at 036, because CA is 04A then.
+Timbre 1 gets 02400E from the host later, timbre 0 does not. Holding C04A at 02200E left the
+audio identical, read back as 02200E, so this does not explain the timbre difference.
+
+Bus structure, from the programs:
+- Each program has two slots, 000-0FF and 100-1FF, and each slot writes and reads the ports.
+  That is four bus channels per sample: slot A L/R and slot B L/R.
+- prog1 forwards D02/D03 in slot A and D00/D01 in slot B. prog0 clears them instead of reading.
+- DASP4 reads slot A into D0D0/D0D1 and slot B into D008/D00C. It never reads AR2.
+- Control words run on the AX3 to AR2 chain, D05/D06.
+
+**Fixed: a word must stay in its slot from chip to chip.** A one half frame hop swapped slots
+at every chip, so DASP0's D00 landed in DASP1's D02 and no sum formed. OB12_PHASE=1 had been
+hiding this. Three notes on channels 0-2, pots moving, MOUT left RMS at 21 s:
+
+| Hop | Phase | MOUT left | Bus |
+|---|---|---|---|
+| 1 | 0 | 24768 | slots mixed |
+| 1 | 1 | 73591 | slots mixed |
+| 2 | 0 | 82349 | sum grows 43368 to 224627 in slot B; slot A constant 116 |
+| 2 | 1 | 38 | same bus, DASP4 on the wrong slot |
+
+Hop 2, phase 0 are now the defaults: all five chips in step, no phase offset. Hop 2 is chosen
+because the firmware's summing bus needs it. Serial timing on the board is not measured.
+The earlier "DASP1 and DASP3 output 82" was an artefact of sampling odd half frames only.
+
+One note per Slave channel, hop 2, phase 0, note at 16 s, pots moving from 14 s:
+
+| Slave channel | DASP4 AX2 L RMS | Sound |
+|---|---|---|
+| 0, 4 | 14331 | noise-like, flatness 0.84, 16-bit RMS about 82; CMEM written continuously |
+| 1, 5 | 140403 | clean sawtooth, 196 Hz, harmonics 1, 0.51, 0.34, 0.26, 0.21 |
+| 2, 3, 6 | 0 | silent |
+
+Idle with no note: MOUT exactly 0 for 22 s. Right channel, AOUT and AX2 R stay 0; D01 and D03
+are 0 on every chip, so the voices never write the right bus. 116 on slot A is not explained.
+
+Open:
+- MIDI through the Master is silent, while direct channel 4 sounds. Master sends `94 3C 64`;
+  DASP0 gets writes, but DASP1 gets none, unlike direct channel 4 (1011 writes in the first
+  second). Not found yet.
+- Timbre 0 being noise-like: the patch, or an emulation fault. Channels 2, 3 silent: same.
 
 ## Tooling and licences
 

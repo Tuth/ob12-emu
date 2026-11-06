@@ -3,8 +3,12 @@
 //
 // usage: ob12_system <rom dir> <seconds> <note seconds> <out.wav>
 //   OB12_DIRECT=n    send one note per channel 0..n-1 straight to the Slave, 1 s apart
+//   OB12_NOTE_CH=c   send one note on channel c straight to the Slave
+//   OB12_VOICE_TRACE=chip,first,last  print one sample of a chip for a PC range, hex
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
-//   OB12_PHASE=0|1   start DASP4 on the even or odd half frame (default 1)
+//   OB12_HOP=1|2     half frames a word takes from one chip to the next (default 2)
+//   OB12_WATCH_C=a   log the first changes of DASP0 CMEM cell a, hex, with their writer
+//   OB12_PHASE=0|1 start DASP4 on the even or odd half frame (default 0)
 //   OB12_NO_1FC=1    disable the 1FC divide step
 //   OB12_NOISE=1     enable the noise secondary, 0x34
 //   OB12_POT_SWEEP=t move all pots from t seconds on
@@ -96,6 +100,23 @@ static void write_wav(const std::string& path, const std::vector<int16_t>& sampl
     f.write((const char*)samples.data(), bytes);
 }
 
+// DMEM by program address, for the true ring.
+static int32_t logical_d(const tms::Core* d, int a) {
+    return d->dmem[a <= d->dcirc ? (a + d->doff) % (d->dcirc + 1) : a];
+}
+
+// One sample of one chip, with the machine state after each word in a PC range.
+static void voice_trace(tms::Core* d, int first, int last) {
+    for (int i = 0; i < 512; i++) {
+        int pc = d->pc;
+        uint32_t w = d->pmem[pc];
+        d->step();
+        if (pc >= first && pc <= last)
+            printf("%03X %08X A %06X %06X M %06X %06X DA %03X %03X CA %03X %03X D04 %06X\n", pc, w, d->acc[0] & 0xffffff, d->acc[1] & 0xffffff,
+                   d->mac_upper(d->mac[0]) & 0xffffff, d->mac_upper(d->mac[1]) & 0xffffff, d->da[0], d->da[1], d->ca[0], d->ca[1], logical_d(d, 4) & 0xffffff);
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc < 5) { puts("usage: ob12_system <rom dir> <seconds> <note seconds> <out.wav>"); return 2; }
     std::string rom = argv[1];
@@ -103,7 +124,7 @@ int main(int argc, char** argv) {
     std::string wav = argv[4];
     int direct = getenv("OB12_DIRECT") ? atoi(getenv("OB12_DIRECT")) : 0;
     bool midi = getenv("OB12_MIDI") != nullptr;
-    int phase = getenv("OB12_PHASE") ? atoi(getenv("OB12_PHASE")) : 1;
+    int phase = getenv("OB12_PHASE") ? atoi(getenv("OB12_PHASE")) : 0;
     bool force_gain = getenv("OB12_FORCE_GAIN") != nullptr;
 
     tms::Options options;
@@ -137,6 +158,16 @@ int main(int argc, char** argv) {
     long total = (long)(seconds * 96000);
     int sent_notes = 0;
     int midi_channel = 0;
+    int note_channel = getenv("OB12_NOTE_CH") ? atoi(getenv("OB12_NOTE_CH")) : -1;
+    bool note_sent = false;
+    int32_t d04_peak[5] = {};
+    int hop = getenv("OB12_HOP") ? atoi(getenv("OB12_HOP")) : 2;
+    static int32_t wire[4][5][3][2];
+    int watch = getenv("OB12_WATCH_C") ? strtol(getenv("OB12_WATCH_C"), nullptr, 16) : 0;
+    int32_t watch_value = 0;
+    int watch_log = getenv("OB12_WATCH_C") ? 0 : 24;
+    static double port_sum[5][3][2][2];  // chip, AX1-3, left/right, half frame
+    long port_count[2] = {};
     try {
         for (long k = 0; k < total; k++) {
             double now = k / 96000.0;
@@ -144,6 +175,10 @@ int main(int argc, char** argv) {
             if (midi && midi_channel < 16 && now >= note_at + midi_channel * 0.5) {
                 m->midi_in({(u8)(0x90 | midi_channel), 0x3c, 0x64});
                 midi_channel++;
+            }
+            if (note_channel >= 0 && !note_sent && now >= note_at) {
+                s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)(0x90 | note_channel), 0x3c, 0x64});
+                note_sent = true;
             }
             if (sent_notes < direct && now >= note_at + sent_notes) {
                 s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)(0x90 | sent_notes), 0x3c, 0x64});
@@ -163,12 +198,19 @@ int main(int argc, char** argv) {
                 ax2[n][c] = host[n].dsp->ax[1][c];
                 ax3[n][c] = host[n].dsp->ax[2][c];
             }
+            // A word sent in one slot arrives hop slots later.
+            int slot = k % 4, from = (k + 5 - hop) % 4;
+            for (int n = 0; n < 5; n++) for (int c = 0; c < 2; c++) {
+                wire[slot][n][0][c] = host[n].dsp->ax[0][c];
+                wire[slot][n][1][c] = ax2[n][c];
+                wire[slot][n][2][c] = ax3[n][c];
+            }
             for (int c = 0; c < 2; c++) {
-                host[0].dsp->ar[0][c] = host[4].dsp->ax[0][c];  // LFO return
+                host[0].dsp->ar[0][c] = wire[from][4][0][c];  // LFO return
                 host[0].dsp->ar[1][c] = 0;
                 for (int n = 1; n < 5; n++) {
-                    host[n].dsp->ar[0][c] = ax2[n - 1][c];
-                    host[n].dsp->ar[1][c] = ax3[n - 1][c];
+                    host[n].dsp->ar[0][c] = wire[from][n - 1][1][c];
+                    host[n].dsp->ar[1][c] = wire[from][n - 1][2][c];
                 }
             }
             // Diagnostic only: DASP4 output gains the firmware has not been seen to write.
@@ -176,13 +218,35 @@ int main(int argc, char** argv) {
             for (int n = 0; n < 5; n++) {
                 Host& h = host[n];
                 if (h.start_pending && ((k + (n == 4 ? phase : 0)) & 1) == 0) { h.start_pending = false; h.running = true; }
-                if (h.running) for (int i = 0; i < 256; i++) h.dsp->step();
+                if (n == 0 && h.dsp->cmem[watch] != watch_value && watch_log < 24) {  // a host write
+                    printf("C%03X host %06X -> %06X at %.4f s\n", watch, watch_value & 0xffffff, h.dsp->cmem[watch] & 0xffffff, now);
+                    watch_value = h.dsp->cmem[watch];
+                    watch_log++;
+                }
+                if (h.running) for (int i = 0; i < 256; i++) {
+                    int pc = h.dsp->pc;
+                    h.dsp->step();
+                    if (n == 0 && h.dsp->cmem[watch] != watch_value) {
+                        if (watch_log < 24) printf("C%03X dsp pc %03X word %08X %06X -> %06X at %.4f s\n", watch, pc, h.dsp->pmem[pc], watch_value & 0xffffff, h.dsp->cmem[watch] & 0xffffff, now);
+                        watch_value = h.dsp->cmem[watch];
+                        watch_log++;
+                    }
+                }
+            }
+            if (now >= note_at + 0.2) {
+                for (int n = 0; n < 5; n++) for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) {
+                    double v = host[n].dsp->ax[p][c];
+                    port_sum[n][p][c][k & 1] += v * v;
+                }
+                port_count[k & 1]++;
             }
             if (k & 1) {
                 auto* d = host[4].dsp;
                 int32_t v[4] = {d->ax[1][0], d->ax[1][1], d->ax[2][0], d->ax[2][1]};
                 for (int c = 0; c < 4; c++) sum[c] += (double)v[c] * v[c];
                 for (int n = 0; n < 5; n++) {
+                    int32_t v04 = abs(logical_d(host[n].dsp, 4));
+                    if (v04 > d04_peak[n]) d04_peak[n] = v04;
                     double l = host[n].dsp->ax[1][0], r = host[n].dsp->ax[1][1];
                     chip_sum[n] += l * l + r * r;
                 }
@@ -220,6 +284,27 @@ int main(int argc, char** argv) {
                host[n].dsp->dir[0], host[n].dsp->dir[1], host[n].dsp->cir[0], host[n].dsp->cir[1], host[n].unknown);
         for (auto& entry : host[n].dsp->unknown) printf(" %08X x%ld", entry.first, entry.second);
         puts("");
+    }
+    if (port_count[0] && port_count[1]) {
+        puts("port rms after the note, even/odd half frame: AX1 L R, AX2 L R, AX3 L R");
+        for (int n = 0; n < 5; n++) {
+            printf("DASP%d", n);
+            for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++)
+                printf(" %.0f/%.0f", sqrt(port_sum[n][p][c][0] / port_count[0]), sqrt(port_sum[n][p][c][1] / port_count[1]));
+            puts("");
+        }
+    }
+    for (int n = 0; n < 4; n++) {
+        auto* d = host[n].dsp;
+        printf("DASP%d D04 now %06X peak %06X; C048:", n, logical_d(d, 4) & 0xffffff, d04_peak[n]);
+        for (int a = 0x48; a < 0x52; a++) printf(" %06X", d->cmem[a] & 0xffffff);
+        printf("\n  D00:");
+        for (int a = 0; a < 0x30; a++) printf(" %06X", logical_d(d, a) & 0xffffff);
+        puts("");
+    }
+    if (const char* trace = getenv("OB12_VOICE_TRACE")) {  // chip,first,last in hex
+        int chip, first, last;
+        if (sscanf(trace, "%x,%x,%x", &chip, &first, &last) == 3) voice_trace(host[chip].dsp, first, last);
     }
     m->lcd.save_pbm("build/lcd.pbm");
     m->save_hot("build/hot.txt");

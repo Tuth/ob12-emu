@@ -33,10 +33,10 @@
     "run_slave": "build/ob12_slave.exe rom 120000000 build/master_to_slave.bin",
     "run_slave_pass": "no STOP line; UART2 Master shows 11 and the version text",
     "core_compare": "build/core_compare.exe rom/dsp 2000 (needs a local public emulator copy)",
-    "run_system": "OB12_DIRECT=3 build/ob12_system.exe rom 20 13 build/own.wav, then python tools/analyse_wav.py build/own.wav 11.5 12.8"
+    "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Division on: steady voice level; timbre 0 (the one the Master plays) stays silent because D04 is 0; right channel zero",
+    "phase": "Two-slot bus found and fixed: voices sum across chips and reach MOUT left; timbre 0 is not silent; MIDI path silent, right channel zero",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -51,7 +51,8 @@
       "DASP4 opened: circular DMEM step and half-frame phase; note tones reach the outputs",
       "Own TMS57070 core: 5.12M steps identical to the public emulator; start-up programs run; noise and impulse gone",
       "MOUT carries a 196 Hz sawtooth with no forced values once pots move; Master sends panel data on change",
-      "Delayed interrupt modelled; MIDI note forwarded by the Master as 94 3C 64"
+      "Delayed interrupt modelled; MIDI note forwarded by the Master as 94 3C 64",
+      "Two-slot audio bus: hop 2, phase 0; summing bus forms, MOUT left RMS 82349 with three notes, idle exactly 0"
     ],
     "blocked": []
   },
@@ -65,12 +66,12 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Find what feeds D04 in the voice program and why it stays 0 for timbre 0",
+    "Find why a note through the Master is silent while direct Slave channel 4 sounds (no DASP1 writes)",
+    "Find why voices never write the right bus, D01/D03",
+    "Find whether timbre 0 noise and silent channels 2, 3 are the patch or an emulation fault",
     "Find why the right channel and AOUT are zero",
     "Map pots to parameters; model realistic panel start values",
     "Implement 1FC correctly: idle voices must stay silent",
-    "Find why the Master does not forward MIDI notes to the Slave",
-    "Explain 196 Hz for note 60, the rising level and silent channel 0",
     "Identify the ISR at FC0300 and what raises it",
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
@@ -80,7 +81,8 @@
     "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
     "Identify Slave reset entry and interrupt vector handling",
-    "Reverse the Slave host-bus writes to derive PLD behaviour"
+    "Reverse the Slave host-bus writes to derive PLD behaviour",
+    "Explain 196 Hz for note 60"
   ],
   "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?",
   "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware."
