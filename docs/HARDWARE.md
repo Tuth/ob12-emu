@@ -300,8 +300,21 @@ harness A/D was constant. With every pot moving from 14 s on (`OB12_POT_SWEEP`):
 - Master turns MIDI channel into Slave channel 4. DASP0 then takes the voice: CMEM writes rise
   from 3 to 37091.
 - That note is silent: voice output stays near 0, MOUT 0. With notes sent direct, channel 0
-  alone was silent too, and channels 1 and 2 sounded. So Slave channels differ, likely by
-  timbre settings of the current program. Not explained yet.
+  alone was silent too, and channels 1 and 2 sounded.
+
+Silent timbre study:
+- The Master loads four timbres, `F0 7E 00..03`, and program data `F0 7E 04`.
+- `tools/compare_channels.py`: Slave channel 4 writes the same values as channel 0. So the
+  Master plays timbre 0, and timbre 0 is the silent one. Timbres 1 and 2 differ in about 30
+  CMEM values, for example C014, C04B, C087.
+- Noise hypothesis tested and rejected: enabling secondary 34 changed nothing.
+- Voice code runs two divides of 16 steps by D04: 1F8 then 15 x 1FC, at 046 and 059.
+- 1FC with a zero divisor made idle voices output DC, so a guard treats divisor 0 as no
+  subtract. This guard is a hypothesis. For timbre 0, D04 stays 0, so no sound.
+- With 1FC on, direct notes: the level is now steady, RMS 160510 on the bus instead of rising,
+  so the rise was caused by the missing division. A second bus slot carries signal, RMS
+  about 150000. Spectrum changed: 392 Hz strongest, 196 Hz at 0.36. 1FC is on by default.
+- Right channel still zero. Why D04 stays 0 for timbre 0 is the open question.
 
 ## Tooling and licences
 

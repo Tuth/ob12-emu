@@ -5,7 +5,8 @@
 //   OB12_DIRECT=n    send one note per channel 0..n-1 straight to the Slave, 1 s apart
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
 //   OB12_PHASE=0|1   start DASP4 on the even or odd half frame (default 1)
-//   OB12_1FC=1       enable the 1FC divide step
+//   OB12_NO_1FC=1    disable the 1FC divide step
+//   OB12_NOISE=1     enable the noise secondary, 0x34
 //   OB12_POT_SWEEP=t move all pots from t seconds on
 //   OB12_FORCE_GAIN=1  diagnostic: force DASP4 output gains C00D, C00F, C0CB
 #include "emu.h"
@@ -110,7 +111,8 @@ int main(int argc, char** argv) {
     options.true_dmem_ring = true;
     options.lock_delay = true;
     options.maclo_multiply = true;
-    options.divide_1fc = getenv("OB12_1FC") != nullptr;
+    options.divide_1fc = getenv("OB12_NO_1FC") == nullptr;
+    options.noise_generator = getenv("OB12_NOISE") != nullptr;
 
     auto* m = new master::Master();
     if (getenv("OB12_POT_SWEEP")) m->pot_sweep_from = atof(getenv("OB12_POT_SWEEP"));

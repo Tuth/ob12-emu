@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 build/ob12_system.exe rom 20 13 build/own.wav, then python tools/analyse_wav.py build/own.wav 11.5 12.8"
   },
   "status": {
-    "phase": "MIDI note reaches the Slave through the Master and takes a voice, but that voice is silent; sound so far only from Slave channels 1 and 2",
+    "phase": "Division on: steady voice level; timbre 0 (the one the Master plays) stays silent because D04 is 0; right channel zero",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -65,7 +65,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Find why Slave channels 0 and 4 are silent while 1 and 2 sound: timbre data of the current program",
+    "Find what feeds D04 in the voice program and why it stays 0 for timbre 0",
     "Find why the right channel and AOUT are zero",
     "Map pots to parameters; model realistic panel start values",
     "Implement 1FC correctly: idle voices must stay silent",

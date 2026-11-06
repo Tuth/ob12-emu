@@ -20,6 +20,7 @@ struct Options {
     bool lock_delay = false;         // a DMEM lock from secondary 2E misses the next 27
     bool maclo_multiply = false;     // primary 43 multiplies by the low MAC word
     bool divide_1fc = false;         // primary 1FC divides by the last ALU operand
+    bool noise_generator = false;    // secondary 34 stores a noise word; real sequence unknown
 };
 
 class Core {
@@ -91,6 +92,7 @@ private:
     int round_bits() const;
 
     uint32_t alu_last = 0;
+    uint32_t noise_state = 0x1234567;
     bool lock_pending = false;
     int insn_cycles = 1;
     uint32_t xmem_read_address = 0;

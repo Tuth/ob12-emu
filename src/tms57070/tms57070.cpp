@@ -287,6 +287,7 @@ void Core::primary(uint32_t word) {
             uint32_t low = u24(acc[0]), high = u24(acc[1]);
             uint32_t difference = (high - divisor) & 0xffffff;
             bool subtract = !(difference & 0x800000);
+            if (options.divide_1fc && divisor == 0) subtract = false;  // hypothesis, see docs
             if (subtract) high = difference;
             acc[1] = s24((high << 1) | (low >> 23));
             acc[0] = s24((low << 1) | (subtract ? 1 : 0));
@@ -606,6 +607,16 @@ void Core::secondary(uint32_t word) {
         break;
     case 0x30: case 0x31: case 0x32: case 0x33:
         dmem[dmem_operand(word)] = xrd;
+        break;
+    case 0x34:
+        if (options.noise_generator) {
+            noise_state ^= noise_state << 13;
+            noise_state ^= noise_state >> 17;
+            noise_state ^= noise_state << 5;
+            dmem[dmem_operand(word)] = s24(noise_state);
+        } else {
+            unknown[0x80000000u | (op << 16)]++;
+        }
         break;
     case 0x38: case 0x39: case 0x3a: case 0x3b:
         break;
