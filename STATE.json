@@ -28,29 +28,29 @@
     "carve_pass": "exit 0; all 10 table entries OK"
   },
   "status": {
-    "phase": "DSP microcode carved and statically validated; nothing executed yet",
+    "phase": "Microcode executes on the public emulator in a local harness; four instructions unimplemented, audio output path unexplained",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
-      "Carved 5 distinct TMS57070 programs from the Slave table at FC2340; opcodes 99.3-100% known against a 59.4% control"
+      "Carved 5 distinct TMS57070 programs from the Slave table at FC2340; opcodes 99.3-100% known against a 59.4% control",
+      "Ran programs 0, 1, 4 for 48000 samples: 512/512 words visited, 0 PC discontinuities"
     ],
-    "blocked": [
-      "Compiling and running the downloaded TMS57070 emulator was denied by the permission system; decide route with Thor"
-    ]
+    "blocked": []
   },
   "assessment": {
     "note": "Judgement, not measurement. Revise after each milestone.",
     "master_boots_to_lcd": 0.9,
     "slave_runs_dsps_loaded": 0.78,
-    "first_real_sound": 0.72,
-    "recognisable_playable": 0.68,
+    "first_real_sound": 0.75,
+    "recognisable_playable": 0.72,
     "realtime_vst3_if_sounding": 0.8,
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Execute the microcode: own core, or run the public emulator locally if Thor allows it",
+    "Explain the audio output path of programs 0, 1, 4 (no MACC-to-AX secondaries)",
+    "Define 1FC, 0x3E flag 8, 0x43 MACLO and secondary 0x34 behaviour from the microcode",
+    "Explain interrupts: 192 fired then stopped, no return path observed",
     "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
-    "Implement secondary opcode 0x34 and settle DMEM size from microcode addressing",
     "Master boot harness on the MAME F2MC-16 core up to the LCD",
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
     "Identify Slave reset entry and interrupt vector handling",

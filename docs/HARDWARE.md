@@ -56,18 +56,31 @@ checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
 
 ## Open, not yet facts
 
-- **Microcode never executed.** Everything above is static. Running it is the next proof.
-- **Straight-line hypothesis.** No jumps plus 512 cycles per sample suggests PC simply
-  wraps once per sample. Would be falsified by a jump form we do not recognise.
+- **Emulated run, 48000 samples per program, public emulator, no parameters from the Slave.**
+  Not ground truth: the emulator is incomplete and the harness feeds a test sine.
+  - Programs 0, 1, 4: all 512 words executed, 0 PC discontinuities, so straight-line
+    execution with PC wrapping holds in this run. DMEM and CMEM change as it runs.
+  - Speed: 26-35 ns per step, instrumented, one thread. Five DSPs need 123M steps per
+    second, about 8 ns per step on one core, so a purpose-built core is needed.
+  - Unimplemented paths hit, per sample: opcode 1FC divide step (30 in programs 0 and 1),
+    0x3E with flag 8 (1 in programs 0 and 1), 0x43 MACLO multiply (3 in programs 0 and 1,
+    2 in program 4), secondary 0x34 (3 in programs 0 and 1, 2 in program 4).
+  - The emulator's 4-deep stack overflows, so the harness wraps it. The program has no
+    return path used here; 192 interrupts fired in 48000 samples, then stopped. Not understood.
+- **Audio output path not seen.** Programs 0, 1, 4 have no secondary 0x18-0x1A MACC-to-AX
+  words, so the emulator's output callback never fired. Each runs one secondary 0x38
+  external write per sample. Voice DSPs have no external RAM, so this needs explaining.
 - **Entry assignment hypothesis.** Entries 0-4 = DASP0-4 in normal use; 5-9 = short
   programs for the same chips, perhaps the Master's PROBEDASP tests. Needs the loader code.
-- **12-byte header meaning.** `3C F3 CF B9 01 00 FC FF 00 03 00 00` varies slightly per
-  program (byte 3, byte 9). Possibly control register values.
+- **12-byte header meaning.** Read as big-endian CR0-CR3, `3CF3CF B90100 FCFF00 030000`
+  sets EXT=1 and EXTMEM=1, the 512-word CMEM mode that 487-word CMEM requires. DASP4's
+  CR3 `250000` differs in the external bus width bits. Strong fit, but the loader is unread.
 - **Slave boot block missing.** 167 of 1754 plausible CALLP targets land above the
   image, on 4 addresses: FFD3A0 (161 calls), FFD215, FFD12E, FFD1BD. The reset vector
   is also absent. `boot_152` at those offsets does not look like function entries.
   No supplied file contains this code.
-- **DMEM size.** Wiki says 256 words, public emulator declares 512. Settle from microcode.
+- **DMEM size.** The public emulator's EXT and EXTMEM logic gives 256-word DMEM with
+  512-word CMEM, which would explain the wiki figure. Confirm from microcode addressing.
 - **PLD behaviour** must be inferred from Slave code and the schematic.
 - **Master to Slave link** runs over MSCK, MTX, STX; protocol unknown.
 
@@ -76,4 +89,8 @@ checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some
   opcodes only log "Unimplemented" (MULU, DIVU, CALLV and others).
 - `Prehistoricman/TMS57070` has no licence file, so its code must not be copied.
-  Get permission or write our own core.
+  Get permission or write our own core. Local measurement runs only, allowed by Thor;
+  nothing from it is in this repo. `tools/tms_harness/harness.cpp` is our own driver and
+  needs a local copy of that emulator to build.
+- `ioelectro/fujitsu-dev` holds Softune-style MB90 installers and an ISP example, no
+  licence shown. Not installed. Possible later source of register headers or a simulator.
