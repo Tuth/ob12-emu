@@ -148,6 +148,30 @@ Core changes against upstream MAME, all in `src/f2mc16`:
 - Bug fixed: interrupt level narrowed to 8 bits, clearing ILM and RP in PS on every interrupt.
 - Bug fixed: `CALLP @RWx+disp8` return address.
 
+## Slave boot, `src/ob12_slave.cpp` (measured)
+
+A replacement stub stands in for the missing resident boot: banks EF, SP FFF0, ILM 7, JMPP
+FC0500. Those values, the vector mapping, the UART2 enable and interrupt levels 2 and 3 are
+choices based on the firmware, not known hardware values.
+
+Over 120M instructions, 42.9 s emulated, replaying the 849 bytes captured from the Master:
+- Prints `Hello, those fellows!`, `Slave Ver: Dec 11 2000`, and its polyphony line.
+- Consumes all 849 bytes and **answers the Master**: 18 bytes, `11 "Dec 11 2000 1.11" 00`.
+- ISRs sit on fixed 0x100 boundaries: FC0100 UART2 RX, FC0200 UART2 TX, FC0300 not yet
+  identified, main at FC0500. Vectors live in the resident boot.
+- Resident calls: FFD12E(0,2), FFD12E(1,4), FFD1BD(0), FFD215(0,5), FFD215(1,3), FFD215(2,0).
+  Meaning unknown. The firmware never configures UART2, so these probably do.
+- UART1 sends 16 bytes to the DAC side: `20 10 60 C2 80 FF C0 FF` twice.
+
+DSP host protocol, read from FC2690-FC2790 and checked against the captured stream:
+- Bytes go to 68FF80, and DASP selection is active low on port 7 bits 0-4.
+- Load: command `0C`, the 12 header bytes, then PMEM words high byte first, padded to 512.
+- The stream holds program 5 first, then program 1. PMEM in the stream equals the carved
+  `prog1.pmem.bin` byte for byte. CMEM follows, also matching at its start.
+- P60 EMPTY is modelled low and P61 RDY high; real timing is unknown.
+- DASP4 stream keeps growing (49160 bytes) as the loop runs: runtime CMEM updates, format
+  not read yet.
+
 ## Tooling and licences
 
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some

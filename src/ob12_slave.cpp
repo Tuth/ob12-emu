@@ -41,6 +41,12 @@ public:
         // Every vector defaults to IsrNull at FC0002 until mapped.
         for (int vector = 0; vector < 256; vector++) set_vector(vector, 0xfc0002);
         set_vector(0x23, 0xfc0100);  // UART2 receive, identified from the code at FC0100
+        set_vector(0x21, 0xfc0200);  // UART2 transmit, identified from the code at FC0200
+        // The resident routines evidently set up the serial ports and interrupt levels;
+        // the firmware never touches UART2 itself. Levels here are assumptions.
+        uart[2].ssr |= 0x02;  // RIE
+        io[0xbb] = 3;
+        io[0xbc] = 2;
         // Reset stub at FFF000.
         static const u8 stub[] = {
             0x42, 0xef, 0x6f, 0x12,        // SSB = EF
@@ -49,6 +55,7 @@ public:
             0x42, 0xef, 0x6f, 0x11,        // ADB = EF
             0x4a, 0xf0, 0xff, 0x47,        // SP = FFF0
             0x0a, 0x00,                    // RP = 0
+            0x1a, 0x07,                    // ILM = 7
             0x63, 0x00, 0x05, 0xfc,        // JMPP FC0500
         };
         std::copy(stub, stub + sizeof stub, flash.begin() + 0x3f000);
@@ -73,6 +80,7 @@ public:
         if (address < 0x500) { internal[address] = data; return; }
         if (address >= 0xfc0000) { Stat& s = touch(flashw, address & 0xffff00); s.writes++; s.last = data; return; }
         if (address >= 0xe00000 && address < 0xf00000) { ram[address & 0xffff] = data; return; }
+        if (address == 0x68ff80) { dsp_byte(data); return; }
         Stat& s = touch(ext, address & 0xfffff0);
         s.writes++;
         s.last = data;
@@ -117,6 +125,14 @@ public:
         puts("external (16-byte block reads writes last firstPC):");
         for (auto& entry : ext)
             printf("  %06X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
+        printf("host bytes with no DASP selected: %ld\n", unselected_bytes);
+        for (int chip = 0; chip < 5; chip++) {
+            printf("DASP%d: %zu bytes:", chip, dsp_stream[chip].size());
+            for (size_t i = 0; i < dsp_stream[chip].size() && i < 24; i++) printf(" %02X", dsp_stream[chip][i]);
+            puts("");
+            std::ofstream file("build/dsp_stream_" + std::to_string(chip) + ".bin", std::ios::binary);
+            file.write((const char*)dsp_stream[chip].data(), dsp_stream[chip].size());
+        }
         puts("flash writes:");
         for (auto& entry : flashw)
             printf("  %06X w%ld last %02X pc %06X\n", entry.first, entry.second.writes, entry.second.last, entry.second.first_pc);
@@ -199,10 +215,20 @@ private:
         set_irq_level(vector ? io[0xb0 + (vector - 11) / 2] & 7 : 7);
     }
 
+    // Host bytes go through the PLD to whichever DASP is selected by NDCS, port 7 bits 0-4.
+    void dsp_byte(u8 data) {
+        u8 selected = ~io[0x07] & 0x1f;
+        for (int chip = 0; chip < 5; chip++)
+            if (selected & (1 << chip)) dsp_stream[chip].push_back(data);
+        if (!selected) unselected_bytes++;
+    }
+
     u8 io_read(u32 address) {
         if (address >= 0x01 && address <= 0x0a) {
             u8 ddr = io[address + 0x10];
-            return (io[address] & ddr) | (0xff & ~ddr);
+            u8 pins = 0xff;
+            if (address == 0x06) pins = 0xfe;  // P60 EMPTY low: DSP accepts host data. P61 RDY high.
+            return (io[address] & ddr) | (pins & ~ddr);
         }
         for (auto& t : timer) {
             if (address == (u32)t.base) return t.tmcsr & 0xfe;
@@ -265,6 +291,8 @@ private:
     std::unordered_map<u32, long> hot;
     std::map<u32, Stat> iostat, ext, flashw;
     std::map<int, long> vectors;
+    std::vector<u8> dsp_stream[5];
+    long unselected_bytes = 0;
     std::vector<std::string> calls;
     std::string text;
 };

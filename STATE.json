@@ -29,10 +29,12 @@
     "build_master": "tools/build_master.bat",
     "run_master": "build/ob12_master.exe rom 300000000 build/lcd.pbm",
     "run_master_pass": "no STOP line; UART2 sends bytes; flash shows sector erases; LCD writes 37381 or more",
-    "presets": "extract the presets zip to rom/presets_mid, then python tools/ob12_sysex.py rom/presets_mid/*.mid -o rom/presets"
+    "presets": "extract the presets zip to rom/presets_mid, then python tools/ob12_sysex.py rom/presets_mid/*.mid -o rom/presets",
+    "run_slave": "build/ob12_slave.exe rom 120000000 build/master_to_slave.bin",
+    "run_slave_pass": "no STOP line; UART2 Master shows 11 and the version text"
   },
   "status": {
-    "phase": "Master reaches the main screen and talks to the Slave; text missing because the font sector is absent",
+    "phase": "Slave firmware runs on a stub boot, loads DSP programs and answers the Master; CPUs not yet linked live, DSPs not attached",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -41,21 +43,24 @@
       "Audio output path: 0x0C/0D/0E flag 4 writes AX1/2/3; AX3 pass-through 100% bit-exact on programs 0 and 1",
       "Chain test: summing bus and LFO bus reach DASP4 inputs bit-exact",
       "Master boot on vendored F2MC-16 core: 300M instructions, 9-task RTOS, splash on LCD, FE every 300 ms",
-      "Master main screen and 849 bytes to the Slave after loading presets, 29F800 model, CALLP fix"
+      "Master main screen and 849 bytes to the Slave after loading presets, 29F800 model, CALLP fix",
+      "Slave boot: banner, 849-byte Master stream consumed, 18-byte version reply, DSP load stream matches carved PMEM"
     ],
     "blocked": []
   },
   "assessment": {
     "note": "Judgement, not measurement. Revise after each milestone.",
     "master_boots_to_lcd": 0.99,
-    "slave_runs_dsps_loaded": 0.78,
-    "first_real_sound": 0.75,
-    "recognisable_playable": 0.72,
+    "slave_runs_dsps_loaded": 0.9,
+    "first_real_sound": 0.8,
+    "recognisable_playable": 0.75,
     "realtime_vst3_if_sounding": 0.8,
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Build the Slave harness: receive the Master stream on UART2 and load the DSPs",
+    "Link Master and Slave live over UART2 in one process",
+    "Decode runtime host commands and drive the five TMS57070 models from the Slave stream",
+    "Identify the ISR at FC0300 and what raises it",
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
     "Explain secondary 0x38",
