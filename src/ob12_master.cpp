@@ -194,13 +194,21 @@ public:
     Uart& link() { return uart[2]; }
     // Test input: from this time on, every pot moves slowly and differently.
     double pot_sweep_from = 0;
+    u16 pot_rest = 0x80;  // where pots sit; the firmware reads only the low byte, 8 bits
+    double pot_clock = -1;  // sample time from the system, the CPU clock runs a little ahead of it
+    double pot_sweep_to = 0;  // pots stay where they are from this time on
+    struct PotStep { double at; int channel, mux; u16 value; };
+    std::vector<PotStep> pot_steps;  // test input: one pot jumps to a value
     u16 pot_value() const {
-        double now = cycles_total / 16e6;
-        if (pot_sweep_from <= 0 || now < pot_sweep_from) return 0x200;
+        double now = pot_clock >= 0 ? pot_clock : cycles_total / 16e6;
         int channel = (adc_channel - 1) & 7;
         int mux = io[0x05] & 7;  // POTA[2:0], sheet 02/15
+        u16 stepped = pot_rest;
+        for (auto& step : pot_steps) if (now >= step.at && step.channel == channel && step.mux == mux) stepped = step.value;
+        if (pot_sweep_from <= 0 || now < pot_sweep_from) return stepped;
+        if (pot_sweep_to > 0 && now > pot_sweep_to) now = pot_sweep_to;
         double phase = (now - pot_sweep_from) * 1.3 + channel * 0.7 + mux * 0.31;
-        return (u16)(512 + 480 * sin(phase));
+        return (u16)(128 + 120 * sin(phase));
     }
     // Test input: queue bytes on the MIDI input.
     void midi_in(const std::vector<u8>& bytes) { uart[1].rx_queue.insert(uart[1].rx_queue.end(), bytes.begin(), bytes.end()); }
@@ -395,7 +403,7 @@ private:
         }
         if (address == 0x29 && rmw()) return 0xff;  // EIRR: bit operations must not clear other flags
         if (address >= 0xc0 && address <= 0xcf) return 0xff;  // keyboard, sheet 04/15, no keys down
-        if (address == 0x2e) return pot_value() & 0xff;  // A/D result, mid scale unless swept
+        if (address == 0x2e) return pot_value() & 0xff;  // A/D result
         if (address == 0x2f) return pot_value() >> 8;
         return io[address];
     }

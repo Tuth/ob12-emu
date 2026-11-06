@@ -16,7 +16,12 @@
 //   OB12_NOISE=1     enable the noise secondary, 0x34
 //   OB12_EARLY_MODE=1  apply secondaries 28-2B before the primary, as the public emulator does
 //   OB12_POT_SWEEP=t move all pots from t seconds on
-//   OB12_FORCE_GAIN=1  diagnostic: force DASP4 output gains C00D, C00F, C0CB
+//   OB12_FORCE_GAIN=1  old diagnostic, not needed: forces DASP4 cells C00D, C00F, C0CB
+//   OB12_POT_REST=v  value every pot reads when not moved, hex
+//   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
+//   OB12_POT_STEPS=t:channel:mux:value,...  one pot jumps at t seconds, value hex
+//   OB12_HOST_LOG=file  log Master to Slave bytes and host CMEM updates with their time
+//   OB12_PORT_LOG=1  write all DASP4 output ports per half frame to build/ports.raw
 #include "emu.h"
 #include "f2mc16.h"
 #include "mb90611.h"
@@ -44,6 +49,9 @@ struct Host {
     std::vector<u8> buffer;
     bool running = false, start_pending = false;
     long updates = 0, programs = 0, unknown = 0;
+    FILE* log = nullptr;
+    int chip = 0;
+    const double* clock = nullptr;
 
     void deselect() { if (state == Update) { state = Idle; buffer.clear(); } }
     void byte(u8 data) {
@@ -86,6 +94,7 @@ struct Host {
                 int address = (buffer[0] << 8 | buffer[1]) & 0x1ff;
                 dsp->cmem[address] = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
                 updates++;
+                if (log) fprintf(log, "%.4f W %d C%03X %06X\n", *clock, chip, address, dsp->cmem[address] & 0xffffff);
                 buffer.clear();
             }
             break;
@@ -147,6 +156,16 @@ int main(int argc, char** argv) {
 
     auto* m = new master::Master();
     if (getenv("OB12_POT_SWEEP")) m->pot_sweep_from = atof(getenv("OB12_POT_SWEEP"));
+    if (getenv("OB12_POT_REST")) m->pot_rest = (u16)strtol(getenv("OB12_POT_REST"), nullptr, 16);
+    if (getenv("OB12_POT_SWEEP_TO")) m->pot_sweep_to = atof(getenv("OB12_POT_SWEEP_TO"));
+    if (const char* list = getenv("OB12_POT_STEPS")) {
+        double at; int channel, mux, value, used;
+        while (sscanf(list, "%lf:%d:%d:%x%n", &at, &channel, &mux, &value, &used) == 4) {
+            m->pot_steps.push_back({at, channel, mux, (u16)value});
+            list += used;
+            if (*list == ',') list++;
+        }
+    }
     auto* s = new slave::Slave();
     m->load(rom);
     s->load(rom);
@@ -155,6 +174,10 @@ int main(int argc, char** argv) {
 
     Host host[5];
     for (auto& h : host) h.dsp = new tms::Core(options);
+    double clock = 0;
+    FILE* host_log = getenv("OB12_HOST_LOG") ? fopen(getenv("OB12_HOST_LOG"), "w") : nullptr;
+    FILE* port_log = getenv("OB12_PORT_LOG") ? fopen("build/ports.raw", "wb") : nullptr;
+    for (int n = 0; n < 5; n++) { host[n].log = host_log; host[n].chip = n; host[n].clock = &clock; }
     s->on_dsp_byte = [&](u8 selected, u8 data) {
         for (int chip = 0; chip < 5; chip++) if (selected & (1 << chip)) host[chip].byte(data);
     };
@@ -204,6 +227,8 @@ int main(int argc, char** argv) {
     try {
         for (long k = 0; k < total; k++) {
             double now = k / 96000.0;
+            clock = now;
+            m->pot_clock = now;
             // One note per MIDI channel, half a second apart, into the Master's MIDI input.
             if (midi && midi_channel < 16 && now >= note_at + midi_channel * 0.5) {
                 m->midi_in({(u8)(0x90 | midi_channel), 0x3c, 0x64});
@@ -226,7 +251,10 @@ int main(int argc, char** argv) {
             s->run(slice); s->tick(slice - s->cycles_left());
             auto& mu = m->link();
             auto& su = s->link();
-            for (; m_sent < mu.head.size(); m_sent++) su.rx_queue.push_back(mu.head[m_sent]);
+            for (; m_sent < mu.head.size(); m_sent++) {
+                su.rx_queue.push_back(mu.head[m_sent]);
+                if (host_log) fprintf(host_log, "%.4f M %02X\n", now, mu.head[m_sent]);
+            }
             for (; s_sent < su.head.size(); s_sent++) mu.rx_queue.push_back(su.head[s_sent]);
 
             // Snapshot the serial links, so every chip sees the previous half frame.
@@ -306,6 +334,11 @@ int main(int argc, char** argv) {
                 out.push_back((int16_t)(v[1] >> 8));
                 count++;
             }
+            if (port_log) {
+                int32_t v[6];
+                for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) v[p * 2 + c] = host[4].dsp->ax[p][c];
+                fwrite(v, 4, 6, port_log);
+            }
             bus.push_back(host[4].dsp->ar[0][0]);
             bus.push_back(host[4].dsp->ar[0][1]);
             if (k % 96000 == 95999) {
@@ -323,6 +356,8 @@ int main(int argc, char** argv) {
         printf("STOP: %s\n", error.what());
     }
     write_wav(wav, out);
+    if (port_log) fclose(port_log);
+    if (host_log) fclose(host_log);
     {
         std::ofstream link("build/live_master_to_slave.bin", std::ios::binary);
         link.write((const char*)m->link().head.data(), m->link().head.size());

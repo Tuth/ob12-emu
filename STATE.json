@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Voice bus is clean: exact pitch, key tracking, three note chord, idle 0; MOUT still needs real panel values",
+    "phase": "MOUT is clean with pots at 8 bit mid value: exact pitch, chord, idle 0, no forced values; pot map started",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -56,7 +56,8 @@
       "Notes through the Master reach the DSPs; third note sounds; direct injection shown to break running status",
       "Mode secondaries act after the primary: table stride 0x15 confirmed by firmware constants; CMEM tables no longer destroyed",
       "Primary 3E flag 8 as compare and two-step pointer secondaries: tables survive, signal passes the filter stage, pitch measured",
-      "Primary 43 as unsigned low word product 24 bits down: bus flatness 0.77 to 0.06, note 48 at 261.5 Hz, chord at 131, 165, 196 Hz"
+      "Primary 43 as unsigned low word product 24 bits down: bus flatness 0.77 to 0.06, note 48 at 261.5 Hz, chord at 131, 165, 196 Hz",
+      "A/D is read as 8 bits: pots at 80 open MOUT, clean tones without forcing; old sweep results retracted"
     ],
     "blocked": []
   },
@@ -70,11 +71,11 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Make MOUT clean: find real panel start values and what DASP4 C00D, C00F, C0CB do",
+    "Name parameters: link A0/A8/B0 message numbers to the list at 35EAC; explain A0 07 and A0 08",
+    "Find why left clips on a chord and what sets the L/R ratio; find why AOUT is 0",
     "Find why note 60 sounds at C3, and what D0A4, D061 near Nyquist are",
     "Measure channels, timbres and pitch again after the mode fix",
     "Ask whether to offer the secondary 29 ordering finding to the TMS57070 project as a PR",
-    "Map pots to parameters; model realistic panel start values",
     "Identify the ISR at FC0300 and what raises it",
     "Reconstruct or replace the font sector at FF0000: find its format from F0851F",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",

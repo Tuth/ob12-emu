@@ -538,3 +538,56 @@ Open:
   values are still unknown.
 - Note 60 sounds at C3, an octave below 261.6 Hz: patch or fault, unknown.
 - AOUT stays 0. Secondary 34 unimplemented. The core comparison was not rerun.
+
+## Pots are 8 bit: MOUT was silent because every pot read 0 (measured)
+
+**Retraction.** The harness "mid scale" 0x200 was not mid scale. The firmware uses only the low
+byte of the A/D result, so 0x200 read as 0, and the old 10 bit sweep 512 + 480 sin wrapped
+through 0-FF again and again. Every result taken with `OB12_POT_SWEEP` before this section,
+including "flatness 0.50-0.59", came from wildly jumping pots. `OB12_FORCE_GAIN` is no longer
+needed and its DC says nothing about the instrument.
+
+Evidence: all pots at 300 send nothing, all pots at 2A5 send 133 bytes. Rest values 80 and 280
+give identical runs, port levels equal to the last digit.
+
+With all pots at 80, now the default, no forced value, MOUT left and right:
+
+| Input | Pitch | Flatness L | Level L, R (24 bit RMS) |
+|---|---|---|---|
+| none | - | exactly 0 | 0, 0 |
+| note 3C | 130.7 Hz, lines 392.7, 654 | 0.005 | 2687803, 1712669 |
+| note 48 | 261.4 Hz, line 785 | 0.003 | 1608382, 1069513 |
+| notes 3C, 40, 43 | 130.7, 165, 195.7 Hz | 0.034 (R 0.007) | 3601899, 2444735 |
+
+- C0CB reads 03513E at rest 80 and 000000 at rest 0, when MOUT was 0. Whether C0CB alone is the
+  cause is not separated.
+- The chord reaches full scale on the left: 101 clipped samples of 67200. Right has none.
+- L/R ratio is about 1.57. Pan or patch, not measured. AOUT stays 0.
+- The real resting position of each pot is unknown. 80 is only a mid value.
+- The two half frames of MOUT carry the same word.
+
+Pot study, `OB12_POT_STEPS`, one group of 8 pots per ADC channel moved to C0, then back to 80,
+note 3C held. Pots send parameter messages such as `A0 07 61`, value = pot / 2. Returning a pot
+does not restore the patch: the parameter keeps the pot's value.
+- Channels 0, 2, 4-7: flatness at most 0.054 after a move, level changes.
+- Channel 1: 0.05-0.08, a line at 260 Hz appears. Not split further.
+- Channel 3: 0.40-0.52. Split alone, only two pots matter:
+  - mux 7, `A0 07`, writes DASP0 C1C5 and C057 in ramps of 64. Flatness 0.36-0.39, but pitch
+    130 Hz with autocorrelation 0.96: a harmonic rich tone, not noise.
+  - mux 6, `A0 08`, writes DASP4 C022. At 5F pitch glides 162 to 170 Hz; at 00 about 47 Hz;
+    at 40 it returns to 130.8 Hz. Unexplained, though DASP4 carries the LFOs.
+
+So flatness alone misled: a rich periodic tone also scores high. Autocorrelation decides.
+- All pots swept, then stopped: periodic, 800 Hz, correlation 0.88. An arbitrary patch.
+- All pots moving: correlation 0.08, truly aperiodic. Every parameter changes at once, so this
+  does not point to a fault, and it does not prove there is none.
+
+The Master CPU clock runs a little ahead of sample time here, so a pot schedule on CPU time
+lands early. `pot_clock` now gives pots the sample time. An earlier one-run 64 pot table was
+thrown away for that reason.
+
+Parameter names: the Master has a list at 35EAC in `12cpu152`, starting LFO1 Rate, LFO1 Fade
+Time, OscCommon Balance1. Its link to the message numbers is not established.
+
+Open: note 60 sounds at 130.8 Hz (patch or fault), what A0 07 and A0 08 are, channel 1 line at
+260 Hz, left clipping, AOUT 0.
