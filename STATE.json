@@ -25,23 +25,27 @@
     "disasm_boot": "unidasm rom/boot_152-emergency-boot.bin -arch f2mc16 -basepc ffc000",
     "vcs": "git status clean after commit",
     "carve": "python tools/ob12_carve.py rom/12dsp111-DSP-v1.11-FINAL.bin -o rom/dsp",
-    "carve_pass": "exit 0; all 10 table entries OK"
+    "carve_pass": "exit 0; all 10 table entries OK",
+    "build_master": "tools\build_master.bat",
+    "run_master": "build\\ob12_master.exe rom 300000000 build\\lcd.pbm",
+    "run_master_pass": "no STOP line; UART1 shows FE bytes; LCD writes 35127 or more"
   },
   "status": {
-    "phase": "Five DSPs linked: both buses bit-exact to DASP4 inputs; DASP4 outputs silent, cause unknown",
+    "phase": "Master firmware runs stably: RTOS idle, MIDI Active Sensing, LCD splash; waiting on something, Slave suspected",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
       "Carved 5 distinct TMS57070 programs from the Slave table at FC2340; opcodes 99.3-100% known against a 59.4% control",
       "Ran programs 0, 1, 4 for 48000 samples: 512/512 words visited, 0 PC discontinuities",
       "Audio output path: 0x0C/0D/0E flag 4 writes AX1/2/3; AX3 pass-through 100% bit-exact on programs 0 and 1",
-      "Chain test: summing bus and LFO bus reach DASP4 inputs bit-exact"
+      "Chain test: summing bus and LFO bus reach DASP4 inputs bit-exact",
+      "Master boot on vendored F2MC-16 core: 300M instructions, 9-task RTOS, splash on LCD, FE every 300 ms"
     ],
     "blocked": []
   },
   "assessment": {
     "note": "Judgement, not measurement. Revise after each milestone.",
-    "master_boots_to_lcd": 0.9,
+    "master_boots_to_lcd": 0.99,
     "slave_runs_dsps_loaded": 0.78,
     "first_real_sound": 0.75,
     "recognisable_playable": 0.72,
@@ -49,12 +53,12 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "Find what the Master waits for after the splash: read the task states and the Slave link",
     "Backward-slice DASP4 from D017/D018 to the input to find what gates the output",
     "Explain secondary 0x38",
     "Define 1FC, 0x3E flag 8, 0x43 MACLO and secondary 0x34 behaviour from the microcode",
     "Explain interrupts: 192 fired then stopped, no return path observed",
     "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
-    "Master boot harness on the MAME F2MC-16 core up to the LCD",
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
     "Identify Slave reset entry and interrupt vector handling",
     "Reverse the Slave host-bus writes to derive PLD behaviour",

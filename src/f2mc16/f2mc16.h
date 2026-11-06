@@ -41,6 +41,13 @@ public:
 	f2mc16_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	bool rmw() { return m_rmw; }
+	u32 ob12_sp24() const { return (m_ps & F_S) ? (m_ssb << 16 | m_ssp) : (m_usb << 16 | m_usp); }
+	u16 ob12_ps() const { return m_ps; }
+	u16 ob12_ssp() const { return m_ssp; }
+	u8 ob12_ssb() const { return m_ssb; }
+	u16 ob12_usp() const { return m_usp; }
+	u8 ob12_usb() const { return m_usb; }
+	u8 ob12_dtb() const { return m_dtb; }
 	void set_irq_level(int level);
 
 protected:

@@ -251,12 +251,13 @@ void f2mc16_device::execute_run()
 
 		if (!m_prefix_valid && !m_ob12_ncc && !m_ob12_cmr && m_irq_level < m_ps && (m_ps & F_I))
 		{
-			uint8_t irq_level = m_irq_level;
+			// OB-12: upstream narrowed the level to 8 bits, which cleared ILM and RP in PS.
+			u16 irq_level = m_irq_level;
 			uint8_t irq_vector = standard_irq_callback(irq_level, m_pc);
 			if (irq_vector)
 			{
 				take_irq_vector(irq_vector);
-				m_ps = (m_ps | (7 << 13)) & irq_level;
+				m_ps = (m_ps & 0x1fff) | (irq_level & 0xe000);
 			}
 		}
 
@@ -2716,6 +2717,15 @@ void f2mc16_device::opcodes_2b6f(u8 operand)
 			setNZ_16(m_acc & 0xffff);
 			m_pc += 3;
 			m_icount -= 10;
+			break;
+
+		// MOVW @AL, AH: word ((AL)) <- (AH), manual 9.1 (OB-12)
+		case 0x1d:
+			m_tmpea = getRWbank(0, m_acc & 0xffff);
+			write_16(m_tmpea, m_acc >> 16);
+			setNZ_16(m_acc >> 16);
+			m_pc += 2;
+			m_icount -= 3;
 			break;
 
 		default:

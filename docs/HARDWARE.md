@@ -114,6 +114,25 @@ checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
 - **PLD behaviour** must be inferred from Slave code and the schematic.
 - **Master to Slave link** runs over MSCK, MTX, STX; protocol unknown.
 
+## Master boot, `src/ob12_master.cpp` (measured)
+
+300M instructions, 76.8 s emulated, no crash. Real firmware, no patches to it.
+
+- Reset at FFC012, boot hands over to the F00000 image, LCD splash drawn (35127 writes).
+- RTOS with 9 tasks; stacks at EC:87F4 upward, switch by `MOVW SP,A` then `RETI` at F01C76.
+- Idle loop at F00709 takes most cycles.
+- UART1 sends MIDI Active Sensing `FE`: 257 bytes in 76.8 s, about one per 300 ms.
+- A/D: 8-channel scan by EI2OS, 140032 transfers. Time base and reload timers all firing.
+- UART0 (LED) and UART2 (Slave) have sent 0 bytes. The display stays on the splash with an
+  empty progress bar. What it waits for is not yet known; the Slave is the prime suspect.
+- From sheet 04/15: CS2 LED 68FF80-8F, CS3 LCD 68FF00-01 (A0 = C/D), CS4 keyboard 0000C0-CF.
+- RAM at EC0000-EFFFFF is the 256 KB SRAM seen through a mirror (A18, A19 unconnected).
+
+Core changes against upstream MAME, all in `src/f2mc16`:
+- Generic effective-address decoder `ob12_ea.inc`: upstream lacks many addressing modes.
+- Added NCC, CMR, CALLV, MOVX A,dir, MOVX A,io, XCH Ri,ea, MOVW @AL,AH and ALU forms.
+- Bug fixed: interrupt level narrowed to 8 bits, clearing ILM and RP in PS on every interrupt.
+
 ## Tooling and licences
 
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some

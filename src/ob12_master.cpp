@@ -148,9 +148,10 @@ public:
         for (int i = 0xb0; i < 0xc0; i++) io[i] = 7;  // ICR: interrupts disabled
         timer[0].base = 0x38; timer[0].vector = 0x1d;
         timer[1].base = 0x3c; timer[1].vector = 0x1e;
-        uart[0].base = 0x20; uart[0].tx_vector = 0x27; uart[0].rx_vector = 0x18; uart[0].name = "UART0 LED";
-        uart[1].base = 0x24; uart[1].tx_vector = 0x25; uart[1].rx_vector = 0x1a; uart[1].name = "UART1 MIDI";
-        uart[2].base = 0x44; uart[2].tx_vector = 0x23; uart[2].rx_vector = 0x21; uart[2].name = "UART2 Slave";
+        // Vectors from the data sheet's interrupt table.
+        uart[0].base = 0x20; uart[0].tx_vector = 0x18; uart[0].rx_vector = 0x27; uart[0].name = "UART0 LED";
+        uart[1].base = 0x24; uart[1].tx_vector = 0x1a; uart[1].rx_vector = 0x25; uart[1].name = "UART1 MIDI";
+        uart[2].base = 0x44; uart[2].tx_vector = 0x21; uart[2].rx_vector = 0x23; uart[2].name = "UART2 Slave";
     }
     void load(const std::string& rom) {
         place(rom + "/12cpu152-CPU-v1.52-FINAL.bin", 0x00000);
@@ -185,7 +186,16 @@ public:
         }
         if (address < 0x500) { internal[address] = data; return; }
         if (address >= 0xf00000) { Stat& s = touch(flashw, address & 0xffff00); s.writes++; s.last = data; return; }
-        if (address >= 0xe00000) { ram[address & 0x3ffff] = data; return; }
+        if (address >= 0xe00000) {
+            u32 cell = address & 0x3ffff;
+            if (watch_from && steps > watch_from && cell >= watch_lo && cell < watch_hi && watch_log.size() < 24) {
+                char line[96];
+                snprintf(line, sizeof line, "watch step %ld PC %06X write %06X = %02X PS %04X", steps, pc, address, data, ob12_ps());
+                watch_log.push_back(line);
+            }
+            ram[cell] = data;
+            return;
+        }
         if (address == 0x68ff00) { lcd.write_data(data); return; }
         if (address == 0x68ff01) { lcd.command(data); return; }
         Stat& s = touch(ext, address & 0xfffff0);
@@ -202,10 +212,20 @@ public:
         timebase += cycles;
         s64 interval = (s64)4 << shift[io[0xa9] & 3];
         if (timebase >= interval) { timebase -= interval; io[0xa9] |= 0x08; }
-        if (adc_busy > 0 && (adc_busy -= cycles) <= 0) { adc_busy = 0; io[0x2d] &= ~0x80; io[0x2d] |= 0x40; }
+        if (adc_busy > 0 && (adc_busy -= cycles) <= 0) {
+            adc_busy = 0;
+            io[0x2d] |= 0x40;  // INT
+            adc_channel++;
+        } else if (!adc_busy && (io[0x2d] & 0x80) && !(io[0x2d] & 0x40)) {
+            // Single mode scans ANS..ANE; the next channel starts once the request is served.
+            if (adc_channel <= (io[0x2c] & 7)) adc_busy = 500; else io[0x2d] &= ~0x80;
+        }
         update_irq();
     }
 
+    long watch_from = 0;
+    u32 watch_lo = 0, watch_hi = 0;
+    std::vector<std::string> watch_log;
     long steps = 0;
     s64 cycles_total = 0;
     long irqs_taken = 0;
@@ -221,6 +241,9 @@ public:
         printf("\ndistinct PCs %zu\nlast PCs:", hot.size());
         for (int i = 0; i < 16; i++) printf(" %06X", trail[(trail_at + i) % 16]);
         puts("");
+        for (auto& line : switches) puts(line.c_str());
+        for (auto& line : watch_log) puts(line.c_str());
+        for (auto& line : jumps) puts(line.c_str());
         lcd.report();
         for (auto& u : uart) {
             printf("%s: %ld bytes:", u.name, u.sent);
@@ -229,6 +252,8 @@ public:
         }
         printf("vectors taken:");
         for (auto& entry : vectors) printf(" %02X x%ld", entry.first, entry.second);
+        printf("\nEI2OS transfers:");
+        for (auto& entry : ei2os_count) printf(" %02X x%ld", entry.first, entry.second);
         puts("\nI/O registers (addr reads writes last firstPC):");
         for (auto& entry : iostat)
             printf("  %02X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
@@ -242,19 +267,64 @@ public:
 
 protected:
     void debugger_instruction_hook(u32 address) override {
+        if (address < 0xe00000) fatalerror("PC left memory: %06X", address);
+        if (address == 0xf01c76 || address == 0xf00899) {
+            char line[160];
+            u32 sp = ob12_ssb() << 16 | ob12_ssp();
+            int n = snprintf(line, sizeof line, "%06X step %ld PS %04X SSP %02X:%04X USP %02X:%04X DTB %02X task %02X frame:", address, steps, ob12_ps(), ob12_ssb(), ob12_ssp(), ob12_usb(), ob12_usp(), ob12_dtb(), read_byte(0xec0e5e));
+            for (int i = 0; i < 12; i += 2) n += snprintf(line + n, sizeof line - n, " %04X", read_word(sp + i));
+            switches.push_back(line);
+            if (switches.size() > 14) switches.erase(switches.begin());
+        }
+        if (abs((int)ob12_ssp() - (int)last_ssp) > 0x200) {
+            char line[96];
+            snprintf(line, sizeof line, "SSP jump step %ld at %06X after %06X: %04X -> %04X PS %04X", steps, address, pc, last_ssp, ob12_ssp(), ob12_ps());
+            jumps.push_back(line);
+            if (jumps.size() > 12) jumps.erase(jumps.begin());
+        }
+        last_ssp = ob12_ssp();
         pc = address;
         steps++;
         hot[address]++;
         trail[trail_at] = address;
         trail_at = (trail_at + 1) % 16;
     }
-    int standard_irq_callback(int, u32) override {
+    int standard_irq_callback(int level, u32) override {
         int vector = best_vector();
-        if (vector) { irqs_taken++; vectors[vector]++; }
+        int icr = (vector - 11) / 2;
+        // The core captured the level earlier; retry if the winning source has changed.
+        if (!vector || (io[0xb0 + icr] & 7) != (level >> 13)) { update_irq(); return 0; }
+        if ((io[0xb0 + icr] & 0x08) && !ei2os_transfer(vector, icr)) { update_irq(); return 0; }
+        irqs_taken++;
+        vectors[vector]++;
         return vector;
     }
 
 private:
+    // Extended intelligent I/O service: one transfer per request, descriptor at 0x100 + 8 * ICS.
+    // Returns true when the interrupt itself must now be taken.
+    bool ei2os_transfer(int vector, int icr) {
+        ei2os_count[vector]++;
+        u32 isd = 0x100 + ics[icr] * 8;
+        u8 iscs = read_byte(isd + 3);
+        u32 bap = read_word(isd) | read_byte(isd + 2) << 16;
+        u16 ioa = read_word(isd + 4);
+        u16 dc = read_word(isd + 6);
+        bool word = iscs & 0x08, to_io = iscs & 0x02;
+        u32 from = to_io ? bap : ioa, to = to_io ? ioa : bap;
+        if (word) write_word(to, read_word(from)); else write_byte(to, read_byte(from));
+        if (!(iscs & 0x04)) write_word(isd, bap + (word ? 2 : 1));
+        if (!(iscs & 0x10)) write_word(isd + 4, ioa + (word ? 2 : 1));
+        dc--;
+        write_word(isd + 6, dc);
+        if (vector == 0x1f) io[0x2d] &= ~0x40;  // I2OSCLR clears the A/D request
+        if (dc == 0) {
+            io[0xb0 + icr] = (io[0xb0 + icr] & ~0x38) | 0x10;  // ISE off, S = count complete
+            return true;
+        }
+        return false;
+    }
+
     bool source_pending(int vector) const {
         for (auto& t : timer) if (t.vector == vector) return t.pending();
         for (auto& u : uart) {
@@ -326,12 +396,17 @@ private:
         case 0xa1:  // CKSCR: MCM follows MCS once the clock has switched.
             io[address] = (data & 0xbf) | (data & 0x04 ? 0x40 : 0);
             break;
+        case 0xb0: case 0xb1: case 0xb2: case 0xb3: case 0xb4: case 0xb5: case 0xb6: case 0xb7:
+        case 0xb8: case 0xb9: case 0xba: case 0xbb: case 0xbc: case 0xbd: case 0xbe: case 0xbf:
+            ics[address & 15] = data >> 4;
+            io[address] = (io[address] & 0xf0) | (data & 0x0f);
+            break;
         case 0xa9:  // TBTC: writing 0 to TBOF clears it.
             io[address] = (data & ~0x08) | (data & io[address] & 0x08);
             break;
-        case 0x2d:  // ADCS high: STRT bit starts a conversion.
-            io[address] = data;
-            if (data & 0x02) { adc_busy = 500; io[address] |= 0x80; io[address] &= ~0x02; }
+        case 0x2d:  // ADCS high: BUSY and INT can only be cleared; STRT starts a conversion.
+            io[address] = (data & 0x3d) | (data & io[address] & 0xc0);
+            if (data & 0x02) { adc_busy = 500; adc_channel = (io[0x2c] >> 3) & 7; io[address] |= 0x80; }
             break;
         default:
             io[address] = data;
@@ -357,7 +432,11 @@ private:
     ReloadTimer timer[2];
     Uart uart[3];
     s64 timebase = 0;
-    int adc_busy = 0;
+    int adc_busy = 0, adc_channel = 0;
+    u8 ics[16] = {};
+    std::map<int, long> ei2os_count;
+    std::vector<std::string> switches, jumps;
+    u16 last_ssp = 0;
     u32 pc = 0;
     u32 trail[16] = {};
     int trail_at = 0;
@@ -371,6 +450,11 @@ int main(int argc, char** argv) {
     auto* cpu = new Master();
     cpu->load(argv[1]);
     long limit = atol(argv[2]);
+    if (argc > 6) {  // watch: from-step low-address high-address (24-bit)
+        cpu->watch_from = atol(argv[4]);
+        cpu->watch_lo = strtoul(argv[5], nullptr, 16) & 0x3ffff;
+        cpu->watch_hi = strtoul(argv[6], nullptr, 16) & 0x3ffff;
+    }
     cpu->attach(cpu);
     cpu->reset();
     try {
