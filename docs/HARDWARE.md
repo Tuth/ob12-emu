@@ -90,7 +90,11 @@ checks: header sits 12 bytes before PMEM, CMEM follows PMEM directly.
 - **Slave boot block missing.** 167 of 1754 plausible CALLP targets land above the
   image, on 4 addresses: FFD3A0 (161 calls), FFD215, FFD12E, FFD1BD. The reset vector
   is also absent. `boot_152` at those offsets does not look like function entries.
-  No supplied file contains this code.
+  No supplied file contains this code. FFD3A0 falls mid-function in `boot_152`, so that
+  file is not the Slave's. Likely factory-resident Slave code that updates never rewrite:
+  the Master's own CPU update also stops at F53D93 and leaves FFC000 untouched, and the
+  Slave image holds no flash-writing text or reset vector, so something resident must
+  receive it. Inferred, not observed.
 - **DMEM size.** The public emulator's EXT and EXTMEM logic gives 256-word DMEM with
   512-word CMEM, which would explain the wiki figure. Confirm from microcode addressing.
 - **PLD behaviour** must be inferred from Slave code and the schematic.
