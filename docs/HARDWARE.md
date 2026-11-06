@@ -955,3 +955,50 @@ since the two-slot study. Source unknown.
 
 C0C8 and C0CE act on the AUX path in the words 0F1-100. Not traced further. The manual says EQ
 does not affect AUX (p.74); that is not measured here.
+
+## Core comparison rerun (measured)
+
+The public emulator's source is no longer on this machine: `core_compare.cpp` needs its header,
+and a search of F: and the user folder was stopped before it finished, finding nothing in the
+places reached. `build/core_compare.exe` still runs, but it holds the old core.
+
+So the check has two links:
+1. `build/core_compare.exe`, public emulator against the core of commit 87d17c3: 5 programs,
+   2000 frames, 5.12M steps, failures 0. Run again today.
+2. `tools/tms_harness/core_regress.cpp`, that old core against the current one, options off, every
+   step: PC, ACC, full MAC, CR0-3, XRD, DA, CA, AX, all DMEM and CMEM. `tools/build_regress.bat`
+   takes the old core from git.
+
+| Program | Loaded CMEM | CMEM of a playing unit |
+|---|---|---|
+| prog0 | 10240000 identical | 10240000 identical |
+| prog1 | 10240000 identical | 10240000 identical |
+| prog4 | 10240000 identical | 10240000 identical |
+| prog5 | 10240000 identical | - |
+| prog9 | 10240000 identical | - |
+
+20000 frames each, 71.68M steps in all, failures 0. So with options off the current core still
+behaves as the one that matched the public emulator. This is not a direct run against it, and
+the link holds only for the steps link 1 covered: link 2 runs ten times longer than link 1 and
+with live CMEM, where no public result exists.
+
+Where each option first leaves the plain core, 500 frames, playing CMEM. These are the
+differences a PR would have to justify. All are firmware evidence, none is checked on silicon.
+
+| Option | prog0, prog1 | prog4 |
+|---|---|---|
+| late_mode_change | 016 `2329201F` | 01E `6C282877` |
+| queued_pointer_load | 00B `7A045005` | 00F `00043000` |
+| compare_3e | 091 `3E801A07` | never |
+| maclo_multiply | 0DD `43C81280` | never in 500 frames |
+| divide_1fc | 047 `1FCB21E3` in prog0, 046 `1F825004` in prog1 | never |
+| noise_generator | 11B `6C341AB0` | 01A `53F410D2` |
+| audio_port_writes | 102 `104D7800` | 03C `104C7000` |
+| lock_delay | never | 05A `782E10D1` |
+| true_dmem_ring | never | never |
+
+"Never" means within 500 frames, one option alone, stand-alone with a test sine, so it does not
+mean the option is unused. prog5 and prog9 never differ. Limits of this table: true_dmem_ring
+did nothing here, probably because DCIRC stays 0 without program 9 before it, so it was not
+exercised; prog4 maclo_multiply did not differ although word 0E8 uses primary 43, reason not
+checked; maclo_unsigned and maclo_shift only act with maclo_multiply and were not tried.
