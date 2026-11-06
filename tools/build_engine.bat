@@ -11,4 +11,5 @@ set FLAGS=/O2 /clang:-O3 /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS /w /Isrc\shi
 %CC% %FLAGS% /c src\ob12_player.cpp /Fobuild\ob12_player.obj
 %CC% %FLAGS% /c src\live_io.cpp /Fobuild\live_io.obj
 %CC% build\ob12_player.obj build\panel_view.obj build\live_io.obj build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj d2d1.lib winmm.lib user32.lib /Febuild\ob12_player.exe
+%CC% %FLAGS% tools\live_api_test.cpp build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj /Febuild\live_api_test.exe
 echo BUILD_EXIT=%ERRORLEVEL%

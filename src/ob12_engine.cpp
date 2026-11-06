@@ -29,7 +29,7 @@ struct Gate {
     alignas(64) std::atomic<long> go{0};
     alignas(64) std::atomic<int> left{0};
     void open(int workers) { left.store(workers, std::memory_order_relaxed); go.fetch_add(1, std::memory_order_release); }
-    void wait() { while (left.load(std::memory_order_acquire)) _mm_pause(); }
+    void wait() { for (long spins = 0; left.load(std::memory_order_acquire); spins++) { if (spins < 20000) _mm_pause(); else std::this_thread::yield(); } }
     void done() { left.fetch_sub(1, std::memory_order_release); }
 };
 
@@ -39,7 +39,7 @@ static void wait_for(Gate& gate, long seen, const std::atomic<bool>& stop) {
     while (gate.go.load(std::memory_order_acquire) == seen) {
         if (stop.load(std::memory_order_relaxed)) return;
         if (++spins < 20000) _mm_pause();
-        else if (spins < 40000) std::this_thread::yield();
+        else if (spins < 2000000) std::this_thread::yield();
         else std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 }
@@ -281,6 +281,9 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
 Engine::~Engine() {
     impl->stop = true;
     for (auto& t : impl->workers) t.join();
+    delete impl->m;
+    delete impl->s;
+    for (auto& h : impl->host) delete h.dsp;
     delete impl;
 }
 

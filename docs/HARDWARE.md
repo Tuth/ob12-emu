@@ -1129,3 +1129,38 @@ speakers, notes from a real MIDI device, runs longer than a minute, a loaded mac
 failure may be waveOut, not the emulator; WASAPI or a plugin host should tell.
 
 MOUT plays at full Master Volume, as pots at rest send nothing.
+﻿
+## Thin plugin and player (measured)
+
+Decision: own VST3 on pluginterfaces, Direct2D, no JUCE, no VSTGUI. VSTGUI brings nothing here
+that the panel needs. The player is cheap, as it shares engine and view, so it exists too.
+
+- `src/ob12_engine.*`: the instrument as a library. Output equals `ob12_system`, WAV MD5
+  103e1c0e43f53d2b2255779eacd1011a, when a note lands on the same millisecond.
+- Live inputs, each applied at the next millisecond: MIDI, pots, keys, encoder. `tools/live_api_test`
+  offline: Master Volume pot 40 gives RMS 234062 from 2155463, pot FF 2055084; PROGRAM, F4, 2 and
+  three encoder steps to AUX STEREO, then a note: MOUT RMS 8.
+- `tools/panel_blob.py`: manual page 7 into `rom/panel.ob12p`, 25347 runs with clip paths. The art
+  stays out of git. `src/panel_view.cpp` renders it once per size into a bitmap by Direct2D, then
+  draws values over it at 30 Hz. The LCD shows the firmware's own screen, without text: no font.
+- `src/panel_controls.h`: 53 pots and 79 keys placed by eye. Left to right order of the Wave Mix
+  sliders and Wave Select keys is assumed. Panel C, tap tempo keys and LEDs are not there.
+- `src/ob12_player.cpp`: `build/ob12_player.exe [MIDI input]`.
+- `src/ob12_vst3.cpp`, bundle `build/OB12.vst3`: stereo out, notes in, all channels to the Master.
+  48 kHz engine, linear resampling to the host rate, 48 ms ring. ROM from OB12_ROM, a `rom` folder
+  beside the DLL, or `F:\Claude\OB-12\rom`.
+
+Tests:
+- Steinberg validator, the build from the Emulator II project: 47 passed, 0 failed.
+- `tools/vst3_smoke`, a small host at 44.1 kHz, 512 frames, wall clock paced: note sounds within
+  40 ms of being sent, 0 of 346 blocks empty from 13 to 17 s. Boot gives about 10 s of silence.
+
+Found on the way: a feeder thread above normal priority made the machine stall for about a second
+at a time, spinning on workers it had pushed off their core. All threads now run at normal
+priority, and workers stay awake on yield for a while before they sleep. So an idle instance still
+uses cores. Timer resolution is raised to 1 ms while a plugin instance lives.
+
+Not tested: a real DAW, the editor inside a host, mouse use of the controls by hand, more than one
+instance. Each instance runs seven busy threads. Host MIDI takes a lock in process(), which is
+not real time safe yet. No parameters, no state saving, pitch bend and controllers from the host
+are not passed on. Measured speed ranged 1.14-1.59 x this round.

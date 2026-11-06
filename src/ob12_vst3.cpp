@@ -1,0 +1,379 @@
+// OB-12 VST3 instrument: stereo out, MIDI in, the panel as editor. Written against pluginterfaces
+// alone. One COM object is both component and, through a facet, edit controller.
+// The engine runs on its own thread and fills a ring; process() only reads from the ring.
+#define NOMINMAX
+#include <windows.h>
+#include <mmsystem.h>
+#include "ob12_engine.h"
+#include "panel_view.h"
+#include "pluginterfaces/base/ipluginbase.h"
+#include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/vst/ivstcomponent.h"
+#include "pluginterfaces/vst/ivstaudioprocessor.h"
+#include "pluginterfaces/vst/ivsteditcontroller.h"
+#include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/vsttypes.h"
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace Steinberg;
+using namespace Steinberg::Vst;
+
+namespace {
+
+const TUID class_id = INLINE_UID(0x0B120B12, 0x6F1C4A3E, 0x9D27C5A8, 0x12DA5F70);
+HINSTANCE module_handle = nullptr;
+const int ring_size = 1 << 15;   // frames, a power of two
+const int lead_frames = 2304;    // 48 ms in the ring
+
+void copy_ascii(String128 out, const char* in) {
+    int i = 0;
+    for (; in[i] && i < 127; i++) out[i] = (TChar)in[i];
+    out[i] = 0;
+}
+
+std::string rom_folder() {
+    if (const char* env = getenv("OB12_ROM")) return env;
+    char path[MAX_PATH] = {};
+    GetModuleFileNameA(module_handle, path, MAX_PATH);
+    std::string here = path;
+    here = here.substr(0, here.find_last_of("\\/"));
+    std::string beside = here + "\\rom";
+    if (GetFileAttributesA((beside + "\\12cpu152-CPU-v1.52-FINAL.bin").c_str()) != INVALID_FILE_ATTRIBUTES) return beside;
+    return "F:\\Claude\\OB-12\\rom";
+}
+
+// The machine and its feeding thread.
+struct Instrument {
+    std::unique_ptr<Engine> engine;
+    std::thread feeder;
+    std::atomic<bool> stop{false};
+    std::vector<float> ring = std::vector<float>(ring_size * 2);
+    std::atomic<uint32_t> written{0}, read{0};
+    std::atomic<long> underruns{0};
+    double position = 0, step = 1;  // resampling, frames of 48 kHz per host frame
+    float last[2] = {}, next[2] = {};
+
+    bool start() {
+        std::string rom = rom_folder();
+        if (GetFileAttributesA((rom + "\\12cpu152-CPU-v1.52-FINAL.bin").c_str()) == INVALID_FILE_ATTRIBUTES) return false;
+        timeBeginPeriod(1);
+        engine.reset(new Engine(rom));
+        feeder = std::thread([this]() {
+            std::vector<int32_t> block(240 * 2);
+            while (!stop) {
+                uint32_t fill = written.load(std::memory_order_relaxed) - read.load(std::memory_order_acquire);
+                bool ready = engine->sounding_ready();
+                if (ready && fill >= (uint32_t)lead_frames) { Sleep(1); continue; }
+                engine->run(block.data(), 240);
+                if (!ready) continue;
+                uint32_t w = written.load(std::memory_order_relaxed);
+                for (int i = 0; i < 240; i++, w++) {
+                    ring[(w & (ring_size - 1)) * 2] = block[i * 2] / 8388608.f;
+                    ring[(w & (ring_size - 1)) * 2 + 1] = block[i * 2 + 1] / 8388608.f;
+                }
+                written.store(w, std::memory_order_release);
+            }
+        });
+        return true;
+    }
+    ~Instrument() {
+        timeEndPeriod(1);
+        stop = true;
+        if (feeder.joinable()) feeder.join();
+        if (getenv("OB12_VST_LOG")) printf("written %u read %u underruns %ld\n", written.load(), read.load(), underruns.load());
+    }
+    bool pull() {
+        uint32_t r = read.load(std::memory_order_relaxed);
+        if (written.load(std::memory_order_acquire) == r) return false;
+        last[0] = next[0];
+        last[1] = next[1];
+        next[0] = ring[(r & (ring_size - 1)) * 2];
+        next[1] = ring[(r & (ring_size - 1)) * 2 + 1];
+        read.store(r + 1, std::memory_order_release);
+        return true;
+    }
+    void render(float* l, float* r, int n, bool wait) {
+        for (int i = 0; i < n; i++) {
+            position += step;
+            bool held = false;
+            while (position >= 1) {
+                while (!pull()) {
+                    if (wait && engine->sounding_ready()) { Sleep(1); continue; }
+                    held = true;
+                    break;
+                }
+                if (held) break;
+                position -= 1;
+            }
+            if (held) { underruns++; position = 0; l[i] = 0; if (r) r[i] = 0; continue; }
+            float a = (float)position;
+            l[i] = last[0] + (next[0] - last[0]) * a;
+            if (r) r[i] = last[1] + (next[1] - last[1]) * a;
+        }
+    }
+};
+
+class Plugin;
+
+class Editor final : public IPlugView {
+public:
+    Editor(Plugin& owner, Engine& engine);
+    ~Editor();
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, FUnknown::iid) || FUnknownPrivate::iidEqual(iid, IPlugView::iid)) { addRef(); *obj = this; return kResultOk; }
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return ++refs; }
+    uint32 PLUGIN_API release() override { uint32 n = --refs; if (!n) delete this; return n; }
+    tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override { return !strcmp(type, kPlatformTypeHWND) ? kResultTrue : kResultFalse; }
+    tresult PLUGIN_API attached(void* parent, FIDString) override { return view.attach(parent) ? kResultOk : kResultFalse; }
+    tresult PLUGIN_API removed() override { view.detach(); return kResultOk; }
+    tresult PLUGIN_API onWheel(float) override { return kResultFalse; }
+    tresult PLUGIN_API onKeyDown(char16, int16, int16) override { return kResultFalse; }
+    tresult PLUGIN_API onKeyUp(char16, int16, int16) override { return kResultFalse; }
+    tresult PLUGIN_API getSize(ViewRect* r) override { if (!r) return kInvalidArgument; *r = size; return kResultOk; }
+    tresult PLUGIN_API onSize(ViewRect* r) override {
+        if (!r) return kInvalidArgument;
+        size = *r;
+        view.resize(r->getWidth(), r->getHeight());
+        return kResultOk;
+    }
+    tresult PLUGIN_API onFocus(TBool) override { return kResultOk; }
+    tresult PLUGIN_API setFrame(IPlugFrame* f) override { frame = f; return kResultOk; }
+    tresult PLUGIN_API canResize() override { return kResultTrue; }
+    tresult PLUGIN_API checkSizeConstraint(ViewRect* r) override {
+        if (!r) return kInvalidArgument;
+        int w = std::max(800, r->getWidth());
+        r->right = r->left + w;
+        r->bottom = r->top + (int)std::lround(w / view.aspect());
+        return kResultTrue;
+    }
+
+private:
+    std::atomic<uint32> refs{1};
+    Plugin& owner;
+    PanelView view;
+    ViewRect size{0, 0, 1500, 400};
+    IPlugFrame* frame = nullptr;
+};
+
+class Facet final : public IEditController {
+public:
+    explicit Facet(Plugin& p) : plugin(p) {}
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override;
+    uint32 PLUGIN_API addRef() override;
+    uint32 PLUGIN_API release() override;
+    tresult PLUGIN_API initialize(FUnknown*) override { return kResultOk; }
+    tresult PLUGIN_API terminate() override { return kResultOk; }
+    tresult PLUGIN_API setComponentState(IBStream*) override { return kResultOk; }
+    tresult PLUGIN_API setState(IBStream*) override { return kResultOk; }
+    tresult PLUGIN_API getState(IBStream*) override { return kResultOk; }
+    int32 PLUGIN_API getParameterCount() override { return 0; }
+    tresult PLUGIN_API getParameterInfo(int32, ParameterInfo&) override { return kInvalidArgument; }
+    tresult PLUGIN_API getParamStringByValue(ParamID, ParamValue, String128) override { return kInvalidArgument; }
+    tresult PLUGIN_API getParamValueByString(ParamID, TChar*, ParamValue&) override { return kInvalidArgument; }
+    ParamValue PLUGIN_API normalizedParamToPlain(ParamID, ParamValue v) override { return v; }
+    ParamValue PLUGIN_API plainParamToNormalized(ParamID, ParamValue v) override { return v; }
+    ParamValue PLUGIN_API getParamNormalized(ParamID) override { return 0; }
+    tresult PLUGIN_API setParamNormalized(ParamID, ParamValue) override { return kResultOk; }
+    tresult PLUGIN_API setComponentHandler(IComponentHandler*) override { return kResultOk; }
+    IPlugView* PLUGIN_API createView(FIDString name) override;
+
+private:
+    Plugin& plugin;
+};
+
+class Plugin final : public IComponent, public IAudioProcessor, public IProcessContextRequirements {
+public:
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, FUnknown::iid) || FUnknownPrivate::iidEqual(iid, IPluginBase::iid) || FUnknownPrivate::iidEqual(iid, IComponent::iid)) { addRef(); *obj = static_cast<IComponent*>(this); return kResultOk; }
+        if (FUnknownPrivate::iidEqual(iid, IAudioProcessor::iid)) { addRef(); *obj = static_cast<IAudioProcessor*>(this); return kResultOk; }
+        if (FUnknownPrivate::iidEqual(iid, IProcessContextRequirements::iid)) { addRef(); *obj = static_cast<IProcessContextRequirements*>(this); return kResultOk; }
+        if (FUnknownPrivate::iidEqual(iid, IEditController::iid)) { addRef(); *obj = &facet; return kResultOk; }
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return ++refs; }
+    uint32 PLUGIN_API release() override { uint32 n = --refs; if (!n) delete this; return n; }
+
+    tresult PLUGIN_API initialize(FUnknown*) override { return kResultOk; }
+    tresult PLUGIN_API terminate() override { instrument.reset(); return kResultOk; }
+
+    tresult PLUGIN_API getControllerClassId(TUID) override { return kNotImplemented; }
+    tresult PLUGIN_API setIoMode(IoMode) override { return kNotImplemented; }
+    int32 PLUGIN_API getBusCount(MediaType type, BusDirection dir) override {
+        if (type == kAudio && dir == kOutput) return 1;
+        if (type == kEvent && dir == kInput) return 1;
+        return 0;
+    }
+    tresult PLUGIN_API getBusInfo(MediaType type, BusDirection dir, int32 index, BusInfo& bus) override {
+        if (index != 0 || getBusCount(type, dir) == 0) return kInvalidArgument;
+        bus.mediaType = type;
+        bus.direction = dir;
+        bus.busType = kMain;
+        bus.flags = BusInfo::kDefaultActive;
+        bus.channelCount = type == kAudio ? 2 : 16;
+        copy_ascii(bus.name, type == kAudio ? "Main Out" : "MIDI In");
+        return kResultOk;
+    }
+    tresult PLUGIN_API getRoutingInfo(RoutingInfo&, RoutingInfo&) override { return kNotImplemented; }
+    tresult PLUGIN_API activateBus(MediaType type, BusDirection dir, int32 index, TBool) override { return index == 0 && getBusCount(type, dir) ? kResultOk : kInvalidArgument; }
+    tresult PLUGIN_API setActive(TBool state) override {
+        if (state) ensure();  // a plug-in scan never activates, so it never boots the machine
+        return kResultOk;
+    }
+    tresult PLUGIN_API setState(IBStream*) override { return kResultOk; }
+    tresult PLUGIN_API getState(IBStream*) override { return kResultOk; }
+
+    tresult PLUGIN_API setBusArrangements(SpeakerArrangement*, int32 inputs, SpeakerArrangement* outputs, int32 count) override {
+        return inputs == 0 && count == 1 && outputs[0] == SpeakerArr::kStereo ? kResultOk : kResultFalse;
+    }
+    tresult PLUGIN_API getBusArrangement(BusDirection dir, int32 index, SpeakerArrangement& arrangement) override {
+        if (dir != kOutput || index != 0) return kInvalidArgument;
+        arrangement = SpeakerArr::kStereo;
+        return kResultOk;
+    }
+    tresult PLUGIN_API canProcessSampleSize(int32 size) override { return size == kSample32 ? kResultTrue : kResultFalse; }
+    uint32 PLUGIN_API getLatencySamples() override { return 0; }
+    tresult PLUGIN_API setupProcessing(ProcessSetup& setup) override { rate = setup.sampleRate; return kResultOk; }
+    tresult PLUGIN_API setProcessing(TBool) override { return kResultOk; }
+    uint32 PLUGIN_API getTailSamples() override { return kInfiniteTail; }
+    uint32 PLUGIN_API getProcessContextRequirements() override { return 0; }
+
+    tresult PLUGIN_API process(ProcessData& data) override {
+        Instrument* inst = instrument.get();
+        if (inst && inst->engine && data.inputEvents) {
+            int32 count = data.inputEvents->getEventCount();
+            for (int32 i = 0; i < count; i++) {
+                Event e{};
+                if (data.inputEvents->getEvent(i, e) != kResultOk) continue;
+                uint8_t m[3];
+                // The Master takes one channel; every host channel goes to it.
+                if (e.type == Event::kNoteOnEvent) {
+                    m[0] = 0x90; m[1] = (uint8_t)std::clamp<int>(e.noteOn.pitch, 0, 127);
+                    m[2] = (uint8_t)std::max(1, (int)std::lround(e.noteOn.velocity * 127));
+                    inst->engine->midi(m, 3);
+                } else if (e.type == Event::kNoteOffEvent) {
+                    m[0] = 0x80; m[1] = (uint8_t)std::clamp<int>(e.noteOff.pitch, 0, 127);
+                    m[2] = (uint8_t)std::lround(e.noteOff.velocity * 127);
+                    inst->engine->midi(m, 3);
+                }
+            }
+        }
+        if (data.numSamples <= 0 || data.numOutputs < 1 || !data.outputs || data.outputs[0].numChannels < 1) return kResultOk;
+        auto& out = data.outputs[0];
+        float* l = out.channelBuffers32[0];
+        float* r = out.numChannels > 1 ? out.channelBuffers32[1] : nullptr;
+        if (!inst || !inst->engine) {
+            memset(l, 0, data.numSamples * 4);
+            if (r) memset(r, 0, data.numSamples * 4);
+            out.silenceFlags = 3;
+            return kResultOk;
+        }
+        inst->step = 48000.0 / rate;
+        inst->render(l, r, data.numSamples, data.processMode == kOffline);
+        out.silenceFlags = 0;
+        return kResultOk;
+    }
+
+    Instrument* ensure() {
+        if (!instrument) {
+            auto* fresh = new Instrument;
+            if (fresh->start()) instrument.reset(fresh);
+            else delete fresh;
+        }
+        return instrument.get();
+    }
+
+private:
+    std::atomic<uint32> refs{1};
+    Facet facet{*this};
+    std::unique_ptr<Instrument> instrument;
+    double rate = 48000;
+};
+
+Editor::Editor(Plugin& p, Engine& engine) : owner(p), view(engine, rom_folder() + "\\panel.ob12p") {
+    static_cast<IComponent&>(owner).addRef();
+    size.bottom = (int)std::lround(1500 / view.aspect());
+}
+Editor::~Editor() { view.detach(); static_cast<IComponent&>(owner).release(); }
+
+tresult PLUGIN_API Facet::queryInterface(const TUID iid, void** obj) { return static_cast<IComponent&>(plugin).queryInterface(iid, obj); }
+uint32 PLUGIN_API Facet::addRef() { return static_cast<IComponent&>(plugin).addRef(); }
+uint32 PLUGIN_API Facet::release() { return static_cast<IComponent&>(plugin).release(); }
+IPlugView* PLUGIN_API Facet::createView(FIDString name) {
+    if (strcmp(name, ViewType::kEditor)) return nullptr;
+    Instrument* inst = plugin.ensure();
+    return inst ? new Editor(plugin, *inst->engine) : nullptr;
+}
+
+class Factory final : public IPluginFactory2 {
+public:
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if (FUnknownPrivate::iidEqual(iid, FUnknown::iid) || FUnknownPrivate::iidEqual(iid, IPluginFactory::iid) || FUnknownPrivate::iidEqual(iid, IPluginFactory2::iid)) { *obj = this; return kResultOk; }
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+    tresult PLUGIN_API getFactoryInfo(PFactoryInfo* info) override {
+        *info = {};
+        strncpy(info->vendor, "Tamas (private)", PFactoryInfo::kNameSize - 1);
+        info->flags = PFactoryInfo::kUnicode;
+        return kResultOk;
+    }
+    int32 PLUGIN_API countClasses() override { return 1; }
+    tresult PLUGIN_API getClassInfo(int32 index, PClassInfo* info) override {
+        if (index) return kInvalidArgument;
+        *info = {};
+        memcpy(info->cid, class_id, sizeof(TUID));
+        info->cardinality = PClassInfo::kManyInstances;
+        strncpy(info->category, kVstAudioEffectClass, PClassInfo::kCategorySize - 1);
+        strncpy(info->name, "OB-12", PClassInfo::kNameSize - 1);
+        return kResultOk;
+    }
+    tresult PLUGIN_API getClassInfo2(int32 index, PClassInfo2* info) override {
+        if (index) return kInvalidArgument;
+        *info = {};
+        memcpy(info->cid, class_id, sizeof(TUID));
+        info->cardinality = PClassInfo::kManyInstances;
+        strncpy(info->category, kVstAudioEffectClass, PClassInfo::kCategorySize - 1);
+        strncpy(info->name, "OB-12", PClassInfo::kNameSize - 1);
+        strncpy(info->subCategories, PlugType::kInstrumentSynth, PClassInfo2::kSubCategoriesSize - 1);
+        strncpy(info->vendor, "Tamas (private)", PClassInfo2::kVendorSize - 1);
+        strncpy(info->version, "0.1.0", PClassInfo2::kVersionSize - 1);
+        strncpy(info->sdkVersion, kVstVersionString, PClassInfo2::kVersionSize - 1);
+        return kResultOk;
+    }
+    tresult PLUGIN_API createInstance(FIDString cid, FIDString iid, void** obj) override {
+        *obj = nullptr;
+        if (!FUnknownPrivate::iidEqual(cid, class_id)) return kNoInterface;
+        auto* p = new Plugin;
+        tresult result = static_cast<IComponent*>(p)->queryInterface(iid, obj);
+        static_cast<IComponent*>(p)->release();
+        return result;
+    }
+};
+Factory factory;
+
+}  // namespace
+
+extern "C" {
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
+    if (reason == DLL_PROCESS_ATTACH) module_handle = instance;
+    return TRUE;
+}
+__declspec(dllexport) bool PLUGIN_API InitDll() { return true; }
+__declspec(dllexport) bool PLUGIN_API ExitDll() { return true; }
+__declspec(dllexport) IPluginFactory* PLUGIN_API GetPluginFactory() { return &factory; }
+}

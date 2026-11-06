@@ -43,7 +43,6 @@ int main(int argc, char** argv) {
 
     std::atomic<bool> stop{false};
     std::thread audio([&]() {
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
         std::vector<int32_t> frames(480 * 2);
         std::vector<int16_t> block(480 * 2);
         uint8_t bytes[64];

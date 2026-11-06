@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Runs faster than real time with identical output; live mode with sound card and MIDI in, 0 underruns at 40-60 ms",
+    "phase": "Thin VST3 and standalone player on one engine and one Direct2D panel; validator 47 of 47; not yet tried in a DAW",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -69,7 +69,8 @@
       "PR draft and patch ready, verified 81.92M steps against own core with options on; not sent",
       "Note 60 octave explained: timbre Osc 1 Shift, A0 00; tuning exact, 3F timbre plays 261.6 Hz",
       "Threads and pipeline: 0.30 x to 1.52 x real time, bit identical; OB12_LIVE plays through waveOut with MIDI in",
-      "First live play by Thor: loud, notes and scale correct through MIDI"
+      "First live play by Thor: loud, notes and scale correct through MIDI",
+      "Engine library bit identical; vector panel; player; VST3 passes the Steinberg validator and plays through process()"
     ],
     "blocked": []
   },
@@ -83,7 +84,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Plugin: VST3 with thin GUI; panel vector from manual page 7, build/panel/front_panel.svg; direct pot, key and encoder API",
+    "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
     "Later, at Thor's request: model the analog output path, sheets 11-15; output is taken digitally from DASP4 AX2 today",
     "Live: test by ear with real MIDI; speed up the DSP core; WASAPI or plugin host for lower latency; stop spinning",
