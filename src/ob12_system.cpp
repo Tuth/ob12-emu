@@ -22,6 +22,8 @@
 //   OB12_AUX_TONE=1  put a test tone on the even bus slot into DASP4 from the note time
 //   OB12_AOUT_CELLS=l,r  study: force the AOUT pointers C07F, C080, hex
 //   OB12_SLAVE_TICK=n  Slave PPG tick every n half frames, default 96 = 1 ms, 0 turns it off
+//   OB12_KEYS=from:to:row:mask,...  hold panel keys, row and mask hex, active low
+//   OB12_ENC=t:detents,...  turn the data encoder
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
 //   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
 //   OB12_POT_STEPS=t:channel:mux:value,...  one pot jumps at t seconds, value hex
@@ -162,6 +164,14 @@ int main(int argc, char** argv) {
     auto* m = new master::Master();
     if (getenv("OB12_POT_SWEEP")) m->pot_sweep_from = atof(getenv("OB12_POT_SWEEP"));
     if (getenv("OB12_POT_REST")) m->pot_rest = (u16)strtol(getenv("OB12_POT_REST"), nullptr, 16);
+    if (const char* list = getenv("OB12_KEYS")) {  // from:to:row:mask,... times in seconds, hex row and mask
+        double from, to; int row, mask, used;
+        while (sscanf(list, "%lf:%lf:%x:%x%n", &from, &to, &row, &mask, &used) == 4) {
+            m->key_steps.push_back({from, to, row, (u8)mask});
+            list += used;
+            if (*list == ',') list++;
+        }
+    }
     if (getenv("OB12_POT_SWEEP_TO")) m->pot_sweep_to = atof(getenv("OB12_POT_SWEEP_TO"));
     if (const char* list = getenv("OB12_POT_STEPS")) {
         double at; int channel, mux, value, used;
@@ -233,6 +243,15 @@ int main(int argc, char** argv) {
             script.push_back({at, bytes});
         }
     }
+    std::vector<std::pair<int, int>> force_cells;  // study: OB12_FORCE_C=addr:value,... on DASP4, hex
+    if (const char* list = getenv("OB12_FORCE_C")) {
+        int a, v, used;
+        while (sscanf(list, "%x:%x%n", &a, &v, &used) == 2) {
+            force_cells.push_back({a, v});
+            list += used;
+            if (*list == ',') list++;
+        }
+    }
     bool aux_tone = getenv("OB12_AUX_TONE") != nullptr;
     int aout_left = -1, aout_right = -1;  // study: point AOUT at other DMEM cells
     if (const char* text = getenv("OB12_AOUT_CELLS")) sscanf(text, "%x,%x", &aout_left, &aout_right);
@@ -253,6 +272,17 @@ int main(int argc, char** argv) {
     int slave_tick = getenv("OB12_SLAVE_TICK") ? atoi(getenv("OB12_SLAVE_TICK")) : 96;
     std::vector<int> cell_pick;  // study: OB12_CELL_PICK=10,42 logs only these DMEM cells
     if (const char* list = getenv("OB12_CELL_PICK")) for (const char* c = list; c; c = strchr(c, ','), c = c ? c + 1 : c) cell_pick.push_back((int)strtol(c, nullptr, 16));
+    // Study: OB12_ENC=t:detents,... turns the data encoder, negative the other way, 16 ms per detent.
+    struct EncMove { double at; int detents; };
+    std::vector<EncMove> enc_moves;
+    if (const char* list = getenv("OB12_ENC")) {
+        double at; int detents, used;
+        while (sscanf(list, "%lf:%d%n", &at, &detents, &used) == 2) {
+            enc_moves.push_back({at, detents});
+            list += used;
+            if (*list == ',') list++;
+        }
+    }
     int hop = getenv("OB12_HOP") ? atoi(getenv("OB12_HOP")) : 2;
     static int32_t wire[4][5][3][2];
     int watch = getenv("OB12_WATCH_C") ? strtol(getenv("OB12_WATCH_C"), nullptr, 16) : 0;
@@ -279,6 +309,15 @@ int main(int argc, char** argv) {
         for (long k = 0; k < total; k++) {
             double now = k / 96000.0;
             clock = now;
+            for (auto& e : enc_moves) if (e.detents && now >= e.at) {
+                int phase = (int)((now - e.at) / 0.004);
+                static const int a_first[4][2] = {{0, 1}, {0, 0}, {1, 0}, {1, 1}};
+                int i = phase & 3;
+                if (e.detents > 0) m->enc_set(a_first[i][0], a_first[i][1]);
+                else m->enc_set(a_first[i][1], a_first[i][0]);
+                if (phase >= 4) { e.detents += e.detents > 0 ? -1 : 1; e.at = now; }
+                break;
+            }
             m->pot_clock = now;
             if (slave_tick && k % slave_tick == 0) s->ppg_tick();
             for (auto& w : slave_windows) {
@@ -345,6 +384,7 @@ int main(int argc, char** argv) {
             // Study: a 440 Hz tone on the empty bus slot, into DASP4 only.
             if (aux_tone && (k & 1) == 0 && now >= note_at) for (int c = 0; c < 2; c++)
                 host[4].dsp->ar[0][c] = (int32_t)(1000000 * sin(now * 440 * 6.283185307));
+            for (auto& f : force_cells) host[4].dsp->cmem[f.first] = f.second;
             if (aout_left >= 0) { host[4].dsp->cmem[0x7f] = aout_left; host[4].dsp->cmem[0x80] = aout_right; }
             // Diagnostic only: DASP4 output gains the firmware has not been seen to write.
             if (force_gain) for (int index : {0x0d, 0x0f, 0xcb}) host[4].dsp->cmem[index] = 0x200000;
@@ -499,6 +539,8 @@ int main(int argc, char** argv) {
     for (auto& entry : s->ext) printf("slave ext %06X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
     for (auto& entry : s->iostat) printf("slave io %02X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
     printf("slave vectors:"); for (auto& entry : s->vectors) printf(" %02X x%ld", entry.first, entry.second); printf(" ENIR %02X EIRR %02X ELVR %02X %02X TBTC %02X", s->io[0x28], s->io[0x29], s->io[0x2a], s->io[0x2b], s->io[0xa9]); puts("");
+    for (auto& entry : m->iostat) if (entry.first < 0x12 || (entry.first >= 0x28 && entry.first < 0x30)) printf("master io %02X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
+    printf("key reads:"); for (long r : m->key_reads) printf(" %ld", r); puts("");
     m->lcd.save_pbm("build/lcd.pbm");
     m->save_hot("build/hot.txt");
     m->save_ram("build/ram.bin");

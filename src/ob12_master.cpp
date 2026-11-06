@@ -122,14 +122,27 @@ public:
 
     // Test probe: runs of printable bytes read from ascending flash addresses, for what the panel shows.
     FILE* text_log = nullptr;
-    u32 text_next = 0, text_start = 0;
-    std::string text_run;
+    // Several streams, because the text routine reads the font between two characters.
+    struct TextRun { u32 next, start; long seen; std::string text; };
+    std::vector<TextRun> text_runs;
+    long text_reads = 0;
     void note_text(u32 address, u8 data) {
-        if (address == text_next && data >= 0x20 && data < 0x7f) { text_run.push_back((char)data); text_next++; return; }
-        if (text_run.size() >= 4) fprintf(text_log, "%.4f T %06X %s\n", pot_clock, text_start, text_run.c_str());
-        text_run.clear();
-        if (data >= 0x20 && data < 0x7f) { text_run.push_back((char)data); text_start = address; text_next = address + 1; }
-        else text_next = 0;
+        if (address < 0xf20000 || address >= 0xf54000) return;
+        text_reads++;
+        bool printable = data >= 0x20 && data < 0x7f;
+        for (size_t i = 0; i < text_runs.size(); i++) {
+            auto& r = text_runs[i];
+            if (r.next == address) {
+                if (printable) { r.text.push_back((char)data); r.next++; r.seen = text_reads; return; }
+                if (r.text.size() >= 3) fprintf(text_log, "%.4f S %06X %s\n", pot_clock, r.start, r.text.c_str());
+                text_runs.erase(text_runs.begin() + i);
+                return;
+            }
+        }
+        for (size_t i = 0; i < text_runs.size();) {
+            if (text_reads - text_runs[i].seen > 400) text_runs.erase(text_runs.begin() + i); else i++;
+        }
+        if (printable && text_runs.size() < 16) text_runs.push_back({address + 1, address, text_reads, std::string(1, (char)data)});
     }
     u8 read_byte(u32 address) override {
         address &= 0xffffff;
@@ -208,6 +221,23 @@ public:
     double pot_sweep_from = 0;
     u16 pot_rest = 0x80;  // where pots sit; the firmware reads only the low byte, 8 bits
     double pot_clock = -1;  // sample time from the system, the CPU clock runs a little ahead of it
+    struct KeyStep { double from, to; int row; u8 mask; };
+    std::vector<KeyStep> key_steps;  // test input: a key held between two times
+    long key_reads[16] = {};
+    u8 key_value(int row) {
+        key_reads[row]++;
+        u8 value = 0xff;
+        for (auto& k : key_steps) if (k.row == row && pot_clock >= k.from && pot_clock < k.to) value &= ~k.mask;
+        return value;
+    }
+    // Test input: the data encoder. Falling edges raise INT0 and INT1, as ELVR is set by the firmware.
+    u8 enc_lines = 3;
+    void enc_set(int a, int b) {
+        u8 next = (u8)(a | b << 1);
+        if ((enc_lines & 1) && !a) io[0x29] |= 1;
+        if ((enc_lines & 2) && !b) io[0x29] |= 2;
+        enc_lines = next;
+    }
     double pot_sweep_to = 0;  // pots stay where they are from this time on
     struct PotStep { double at; int channel, mux; u16 value; };
     std::vector<PotStep> pot_steps;  // test input: one pot jumps to a value
@@ -399,7 +429,10 @@ private:
         // Inputs idle high: sheet 02/15 pulls the button lines up through AR1.
         if (address >= 0x01 && address <= 0x0a) {
             u8 ddr = io[address + 0x10];
-            return (io[address] & ddr) | (0xff & ~ddr);
+            // P20-27 read BUT[7:0]; P30-33 select the button bar, sheets 02/15, 04/15.
+            u8 pins = address == 0x02 ? key_value(io[0x03] & 15) : 0xff;
+            if (address == 0x07) pins = (pins & 0xfc) | enc_lines;  // P70, P71: encoder, sheet 02/15
+            return (io[address] & ddr) | (pins & ~ddr);
         }
         for (auto& t : timer) {
             if (address == (u32)t.base) return t.tmcsr & 0xfe;
@@ -532,6 +565,7 @@ private:
     u32 trail[16] = {};
     int trail_at = 0;
     std::unordered_map<u32, long> hot;
+public:
     std::map<u32, Stat> iostat, ext, flashw, blank;
     std::map<int, long> vectors;
 };

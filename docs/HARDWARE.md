@@ -798,6 +798,8 @@ The CPU clock in the harness runs about 4% ahead of sample time: a note sent at 
 
 ## BUS search (measured, not solved)
 
+Solved in "Panel keys, encoder and the BUS message".
+
 Still not found. Tested with the tick on, retriggered notes, AOUT stayed 0 throughout:
 - Each byte of `F0 7E 04` set to 0, 1, 2, 3, 4, 5, sound kept. Bytes 42-44 at 1 raise the level.
 - `A8` n v for all n, v = 1, 2, 4, 5; for n 40-7F, v = 0B, 0F, 17, 18, 40, 7F.
@@ -865,3 +867,56 @@ Check with the tick on, Common Attack pot A0: the stage change arrives 0.762 s a
 as delayed, and the amp one 0.863 s after it.
 
 The note at 13 s here runs with timer 2 at 24999 ticks, 25 s, in this patch.
+
+## Panel keys, encoder and the BUS message (measured)
+
+Keys. Sheets 02/15, 04/15: P30-33 select a button bar through IC4, P20-27 read BUT[7:0], active
+low. Modelled, `OB12_KEYS`. The earlier "keyboard at C0-CF" is the musical keyboard. Bars from
+the panel sheets: 0 Panel C, 1-4 Panel A, 5-11 Panel B. Used here: bar 10 bit 3 PROGRAM, bar 9
+bits 1-4 F1-F4, bar 6 bit 2 and bar 7 bit 2 digits 2 and 3, bar 11 bit 4 ROUTERS, bar 7 bit 3
+ENTER.
+
+Encoder. P70, P71 with INT0, INT1 on falling edges, `OB12_ENC`. Direction taken as written, it
+stepped the values up, so it works; the real A/B phase is not checked.
+
+Screens without a font. The probe now follows strings through the font reads, as `S` lines in
+`OB12_HOST_LOG`. PROGRAM, F4, 2 reaches the BUS page: "MAIN STEREO".
+
+**The BUS message is `A8 27 v`.** Turning the encoder on that page:
+
+| v | Display | MOUT L | MOUT R | Bus slot |
+|---|---|---|---|---|
+| 00 | MAIN STEREO | sound | sound | odd |
+| 01 | MAIN MONO L | 4275862 | 0 | odd, left only |
+| 02 | MAIN MONO R | 0 | sound | odd |
+| 03 | AUX STEREO | 0 | 0 | even, 1786257, 1360048 |
+| 04 | AUX MONO 1 | 0 | 0 | not read |
+| 05 | AUX MONO 2 | 0 | 0 | not read |
+
+It applies to the next note, which is why my earlier sweep with a held note saw nothing. It
+confirms the empty bus slot is the AUX bus. Rows 01 and 03 measured on notes played after the
+message; 04 and 05 only by silent MOUT.
+
+Router pages, from ROUTERS: `A8 0C` router, SERIAL 1, SERIAL 2, CLEAN/SOLO; `A8 0D`; F2 page
+`A8 0E 01` AUX MODE COUPLED. With COUPLED, an AUX Part comes out of MOUT again, as the manual
+says (p.75).
+
+**AOUT is silent because C0CE is 0.** STANDARD mode, AUX STEREO, note 3C, forced by
+`OB12_FORCE_C`:
+
+| Forced | AOUT left RMS | AOUT right RMS |
+|---|---|---|
+| none | 0 | 0 |
+| C0C8 = 7FFFFF | 0 | 0 |
+| C0CE = 400000 | 893155 | 680049 |
+| C0CE = 7FFFFF | 1786309 | 1360097 |
+
+So C0CE is a linear AUX output level, and the signal is the bus word itself: 1786309 against
+1786257. C07F, C080 need no change. This replaces the "pointers parked on empty cells" reading:
+D00B is D00A one sample later, because the ring moves, and my writer probe ignored that.
+
+Not found: what writes C0CE. It is 0 in the loaded CMEM (C0CB is 03513F there) and no host write
+touched it, with AUX active, through: `A8` n for all n at 7F, 40, 01; `F0 7F 30 04 p` for p 0-1F
+with values 007F, 047F, 7F7F, 0100. So on a real unit either another message sets it, or a word
+of mine is wrong and the value should not depend on C0CE. `OB12_FORCE_C` is a study switch only;
+nothing is forced by default.
