@@ -199,6 +199,7 @@ private:
             if (u.rx_vector == vector) return u.rx_pending();
         }
         if (vector == 0x22) return (io[0xa9] & 0x18) == 0x18;
+        if (vector == 0x2a) return io[0x9f] & 1;  // delayed interrupt module, DIRR
         if (vector >= 0x0b && vector <= 0x19 && (vector & 1)) {
             u8 bit = 1 << ((vector - 0x0b) / 2);
             return io[0x28] & io[0x29] & bit;

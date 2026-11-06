@@ -134,11 +134,15 @@ int main(int argc, char** argv) {
     long count = 0;
     long total = (long)(seconds * 96000);
     int sent_notes = 0;
-    bool midi_done = false;
+    int midi_channel = 0;
     try {
         for (long k = 0; k < total; k++) {
             double now = k / 96000.0;
-            if (midi && !midi_done && now >= note_at) { m->midi_in({0x90, 0x3c, 0x64}); midi_done = true; }
+            // One note per MIDI channel, half a second apart, into the Master's MIDI input.
+            if (midi && midi_channel < 16 && now >= note_at + midi_channel * 0.5) {
+                m->midi_in({(u8)(0x90 | midi_channel), 0x3c, 0x64});
+                midi_channel++;
+            }
             if (sent_notes < direct && now >= note_at + sent_notes) {
                 s->link().rx_queue.insert(s->link().rx_queue.end(), {(u8)(0x90 | sent_notes), 0x3c, 0x64});
                 sent_notes++;
@@ -216,5 +220,7 @@ int main(int argc, char** argv) {
         puts("");
     }
     m->lcd.save_pbm("build/lcd.pbm");
+    m->save_hot("build/hot.txt");
+    m->save_ram("build/ram.bin");
     return 0;
 }

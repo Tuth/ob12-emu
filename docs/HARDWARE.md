@@ -289,6 +289,20 @@ harness A/D was constant. With every pot moving from 14 s on (`OB12_POT_SWEEP`):
 - Not measured: which pot drives which parameter. The sweep moves all at once, so the level
   here is arbitrary and DASP0's output changes as parameters move.
 
+## MIDI through the Master (measured)
+
+- The UART1 receive ISR F0C75D stores bytes in a ring at EC5779 and ends `MOV I:9F,#1`. That
+  is DIRR, the delayed interrupt module, vector 2A. Bytes are parsed there. It was not
+  modelled; added to Master and Slave.
+- With it, notes on 16 channels gave one forwarded message: `94 3C 64` at stream offset 12B4.
+  The other 15 were not forwarded, which fits a single receive channel. Which input channel
+  passed is not measured, though channel 0 was sent first and writes began at once.
+- Master turns MIDI channel into Slave channel 4. DASP0 then takes the voice: CMEM writes rise
+  from 3 to 37091.
+- That note is silent: voice output stays near 0, MOUT 0. With notes sent direct, channel 0
+  alone was silent too, and channels 1 and 2 sounded. So Slave channels differ, likely by
+  timbre settings of the current program. Not explained yet.
+
 ## Tooling and licences
 
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some
