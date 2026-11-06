@@ -34,7 +34,7 @@
     "run_slave_pass": "no STOP line; UART2 Master shows 11 and the version text"
   },
   "status": {
-    "phase": "DASP4 passes signal to MOUT and AOUT, buried in a broadband noise fault; Master does not forward MIDI notes yet",
+    "phase": "DASP4 noise replaced by a 233 Hz impulse from the DMEM ring model; ring size and 1FC unresolved; emulator patches are local only",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -60,7 +60,9 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Find the DASP4 noise present with no note: implement 0x43, 0x34, 1FC, 0x3E flag 8, check XMEM word format",
+    "Find the DMEM ring cell behind the 233 Hz impulse and settle ring size",
+    "Implement 1FC correctly: idle voices must stay silent",
+    "Write our own TMS57070 core or get permission, so DSP changes can live in this repo",
     "Find why the Master does not forward MIDI notes to the Slave",
     "Explain 196 Hz for note 60, the rising level and silent channel 0",
     "Identify the ISR at FC0300 and what raises it",

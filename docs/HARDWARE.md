@@ -215,6 +215,23 @@ Result with notes sent to the Slave, 20 s emulated:
 - The note is present under it: peaks 187.5, 375, 562.5, 750 Hz and a second series at 179,
   366.5, 554, 741.5 Hz. The voice bus earlier read 196 Hz; the change is unexplained.
 
+Noise investigation, later round. The fault changed form but is not solved:
+- The program never sets DCIRC, so the emulator's window swept all 256 DMEM cells and hit
+  the fixed variables. Direct addresses split cleanly: unlocked 00-CC, locked CE-FF.
+- Local change: a true ring over the low cells, fixed cells above. Ring size unknown; CC to D0
+  were tried, none is clearly right. 100 (the old behaviour) is far worse.
+- With the ring alone, silent input built up to full scale: unstable feedback.
+- 0x43 as multiply by MACLO cut silent output from about 6,000,000 to 100,000. As load-and-
+  halve (the IDA module's reading) it gave about 1,000,000. MACLO looks right, not proven.
+- 1FC as written here is wrong or incomplete: it makes idle voices output DC (055C10).
+  It is off for now, so 30 divide steps per sample still do nothing.
+- Current output with ring CE, 0x43 on, 1FC off: broadband noise gone, spectral flatness
+  0.72 to 0.0. Instead a full-scale impulse repeats at 233.0 Hz, 48000/206, the ring period.
+  One cell or wrap point is wrong. Note level on the voice bus rises under it but is not
+  audible beside the spike.
+- All of these changes live only in the local emulator copy: 0x2E lock delay, ring, 0x43,
+  1FC, audio port writes. They are listed here because that copy is not in this repo.
+
 ## Tooling and licences
 
 - MAME `src/devices/cpu/f2mc16` includes an `MB90611A` device, BSD-3-Clause. Some

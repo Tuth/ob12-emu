@@ -142,7 +142,49 @@ static int search(const std::vector<uint8_t>& stream, int frames) {
     return 0;
 }
 
+// Silent input: where does the first nonzero data come from, and how does the output grow?
+static int origin(const std::vector<uint8_t>& stream, int frames) {
+    Emulator* d = new Emulator();
+    d->register_sample_out_callback(on_out);
+    d->register_external_bus_in_callback(on_in);
+    d->register_external_bus_out_callback(on_ext);
+    replay(d, stream);
+    d->PC.value = 0;
+    static bool seen[512];
+    int logged = 0;
+    double sum = 0;
+    long count = 0, xmem_nonzero = 0;
+    for (int f = 0; f < frames; f++) {
+        for (int i = 0; i < 512; i++) {
+            int pc = d->PC.value;
+            uint32_t word = d->PMEM[pc];
+            d->step();
+            for (int a = 0; a < 512; a++) {
+                if (!seen[a] && d->DMEM[a].value) {
+                    seen[a] = true;
+                    if (logged++ < 40)
+                        printf("frame %d PC %03X %08X: D%03X = %06X  ACC %06X %06X M %06X %06X XRD %06X\n", f, pc, word, a,
+                               d->DMEM[a].value & 0xffffff, d->ACC1.value & 0xffffff, d->ACC2.value & 0xffffff,
+                               d->MACC1.getUpper().value & 0xffffff, d->MACC2.getUpper().value & 0xffffff, d->XRD.value & 0xffffff);
+                }
+            }
+        }
+        double v = d->AX2L.value;
+        sum += v * v;
+        count++;
+        if (count == frames / 8 || f == frames - 1) {
+            printf("frame %d AX2L rms %.0f last AX2 %06X %06X AX3 %06X %06X\n", f, sqrt(sum / count), d->AX2L.value & 0xffffff,
+                   d->AX2R.value & 0xffffff, d->AX3L.value & 0xffffff, d->AX3R.value & 0xffffff);
+            sum = 0; count = 0;
+        }
+    }
+    for (int i = 0; i < 0x10000; i++) if (d->XMEM[i].value) xmem_nonzero++;
+    printf("nonzero D cells %d, XMEM nonzero in first 64K %ld, XOFF %X DOFF %X DCIRC %X\n", logged, xmem_nonzero, d->XOFF, d->DOFF.value, d->DCIRC.value);
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc > 5 && !strcmp(argv[5], "origin")) return origin(read_file(argv[2]), atoi(argv[3]));
     if (argc > 5) return search(read_file(argv[2]), atoi(argv[3]));
     auto stream = read_file(argv[2]);
     int frames = atoi(argv[3]);
