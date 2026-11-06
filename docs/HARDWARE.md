@@ -457,3 +457,46 @@ Open:
   needs a local copy of that emulator to build.
 - `ioelectro/fujitsu-dev` holds Softune-style MB90 installers and an ISP example, no
   licence shown. Not installed. Possible later source of register headers or a simulator.
+
+## Compare primary and pointer pipeline (firmware evidence, not checked on silicon)
+
+**Superseded.** The "Not right yet" list above: the runaway and the stall were emulation
+faults. The full scale values on the bus were control words, 200000 and 7FFExx, not audio.
+
+Two more core changes. Both are on by default in `ob12_system`, off in the core comparison.
+
+`compare_3e`, primary 3E flag 8 compares DMEM with CMEM, flags only. Evidence:
+- Each sample selects a voice slot: index = tick, minus 3 from tick 3 on, read from C00B = 3
+  or C00C = 0. 091 `3E801A07` tests D07 against C00B, 092 conditionally sets CA1.
+- 098/099 then add the index to D0B6 = 11C and load a pointer pair from C11C-C11E.
+- Unimplemented, ACCN was stale, the index reached 3-5, and the pair came from C11F-C121.
+  Those are not pointers, so later stores went through CA over C003, C00D, C068 and more.
+  C004 also holds the tick wrap mask, so D07 stuck at 6.
+- With it: pointers 11C, 11D, 11E cycle, D0B6 stays 11C, tables survive.
+
+`queued_pointer_load`, secondaries 04, 05, 06, 08, 09 read their source at once and land two
+steps later, the same as C1-C5 immediates. Evidence:
+- 127 loads DA1, and 128 must still read D050 through the old DA1: 120-123 and 128-12B are
+  the same section, one on D04F and one on D050.
+- 11E loads DA0 and must still read D09C through the old DA0. Loading first made the filter
+  read itself, so the signal stopped between D09C and D09D.
+- Word pairs spaced exactly two apart: 0A7 to 0A9, 099 to 09B, 020 to 022.
+- Tried and rejected: acting right after the primary. Secondary 04 then read the new ACC at
+  109, which put control words on the bus while idle. Only 04 did that, measured one by one.
+
+Measured with both, no pots, DASP0 cell log and voice bus:
+- Idle bus is exactly 0.
+- Note 3C: 130.5 Hz, autocorrelation 130.08 Hz, partials 392.5 and 654 Hz. C3 is 130.81.
+- Note 48: oscillator cells D046-D053 at 260-262 Hz, an octave up. Key tracking works.
+  The bus shows no clear pitch for this note: autocorrelation 0.065, flatness 0.80.
+- Note 3C on the bus: flatness 0.77, 41 percent of the energy above 4 kHz.
+- With OB12_POT_SWEEP=12: MOUT left 236688, right 190086, falling to 49750, 31489. The old
+  left/right imbalance is gone. Bus L/R slots: left 1.9M, right 1.3M without pots.
+
+Open:
+- The noise. D0A4, D061, D062 run at full scale at 23938 Hz, and D09E, D050 near 20 kHz, even
+  idle with no note. So these filter sections are unstable. Idle output is gated to 0.
+  Not proven to be the noise on the bus.
+- Why note 3C sounds an octave below 261.6 Hz: patch setting or fault, unknown.
+- Secondary 34 still unimplemented; the 1FC zero guard is still a hypothesis.
+- AOUT stays 0. The core comparison was not rerun; both options default to off.

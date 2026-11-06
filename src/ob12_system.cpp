@@ -117,8 +117,8 @@ static void voice_trace(tms::Core* d, int first, int last) {
         uint32_t w = d->pmem[pc];
         d->step();
         if (pc >= first && pc <= last)
-            printf("%03X %08X A %06X %06X M %06X %06X DA %03X %03X CA %03X %03X D00 %06X D02 %06X D42 %06X %06X %06X\n", pc, w, d->acc[0] & 0xffffff, d->acc[1] & 0xffffff,
-                   d->mac_upper(d->mac[0]) & 0xffffff, d->mac_upper(d->mac[1]) & 0xffffff, d->da[0], d->da[1], d->ca[0], d->ca[1], logical_d(d, 0) & 0xffffff, logical_d(d, 2) & 0xffffff, logical_d(d, 0x42) & 0xffffff, logical_d(d, 0x43) & 0xffffff, logical_d(d, 0x44) & 0xffffff);
+            printf("%03X %08X A %06X %06X M %06X %06X DA %03X %03X CA %03X %03X D00 %06X D02 %06X D42 %06X %06X %06X DB6 %06X d2 %06X %06X\n", pc, w, d->acc[0] & 0xffffff, d->acc[1] & 0xffffff,
+                   d->mac_upper(d->mac[0]) & 0xffffff, d->mac_upper(d->mac[1]) & 0xffffff, d->da[0], d->da[1], d->ca[0], d->ca[1], logical_d(d, 0) & 0xffffff, logical_d(d, 2) & 0xffffff, logical_d(d, 0x42) & 0xffffff, logical_d(d, 0x43) & 0xffffff, logical_d(d, 0x44) & 0xffffff, logical_d(d, 0xb6) & 0xffffff, d->mac_upper(d->mac_d2[0]) & 0xffffff, d->mac_upper(d->mac_d2[1]) & 0xffffff);
     }
 }
 
@@ -140,6 +140,8 @@ int main(int argc, char** argv) {
     options.divide_1fc = getenv("OB12_NO_1FC") == nullptr;
     options.noise_generator = getenv("OB12_NOISE") != nullptr;
     options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
+    options.compare_3e = getenv("OB12_NO_3E") == nullptr;
+    options.queued_pointer_load = getenv("OB12_EARLY_POINTER") == nullptr;
 
     auto* m = new master::Master();
     if (getenv("OB12_POT_SWEEP")) m->pot_sweep_from = atof(getenv("OB12_POT_SWEEP"));
@@ -188,6 +190,12 @@ int main(int argc, char** argv) {
             watch_d[(int)strtol(p, &p, 16)];
             if (*p == ',') p++;
         }
+    }
+    FILE* cell_log = nullptr;  // per sample: DMEM 256 and CMEM 512 words of one chip
+    double cell_from = 0, cell_to = 0;
+    int cell_chip = 0;
+    if (const char* range = getenv("OB12_CELL_LOG")) {  // chip,from,to in seconds after the note
+        if (sscanf(range, "%d,%lf,%lf", &cell_chip, &cell_from, &cell_to) == 3) cell_log = fopen("build/cells.bin", "wb");
     }
     static double port_sum[5][3][2][2];  // chip, AX1-3, left/right, half frame
     long port_count[2] = {};
@@ -253,6 +261,10 @@ int main(int argc, char** argv) {
                 if (h.running) for (int i = 0; i < 256; i++) {
                     int pc = h.dsp->pc;
                     h.dsp->step();
+                    if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to) {
+                        fwrite(h.dsp->dmem, 4, 256, cell_log);
+                        fwrite(h.dsp->cmem, 4, 512, cell_log);
+                    }
                     if (n == 0 && start_trace > 0 && h.programs >= 2) { start_trace--; printf("S %03X %08X A %06X %06X DA %03X %03X CA %03X %03X\n", pc, h.dsp->pmem[pc], h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->da[0], h.dsp->da[1], h.dsp->ca[0], h.dsp->ca[1]); }
                     if (n == 0 && !watch_d.empty() && now >= note_at) for (auto& cell : watch_d) {
                         int32_t v = h.dsp->dmem[cell.first];

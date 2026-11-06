@@ -22,6 +22,8 @@ struct Options {
     bool divide_1fc = false;         // primary 1FC divides by the last ALU operand
     bool noise_generator = false;    // secondary 34 stores a noise word; real sequence unknown
     bool late_mode_change = false;   // secondaries 28-2B act after the primary of the same word
+    bool queued_pointer_load = false;  // secondaries 04-06, 08, 09 land two steps later, like C1-C5
+    bool compare_3e = false;         // primary 3E flag 8 compares DMEM with CMEM, flags only
 };
 
 class Core {
@@ -78,6 +80,7 @@ private:
     void pipeline();
     void queue_single(uint16_t* target, uint16_t value);
     void queue_dual(uint16_t* target, uint32_t value);
+    void set_pointer(uint16_t* target, uint16_t value);
 
     int32_t settle_acc(int64_t value);
     void load_acc(uint32_t word, int operation);

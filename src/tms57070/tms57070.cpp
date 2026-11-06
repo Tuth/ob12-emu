@@ -223,6 +223,10 @@ void Core::mac_set_lower(int unit, uint32_t value) {
 
 void Core::queue_single(uint16_t* target, uint16_t value) { single_ptr[0] = target; single_value[0] = value & 0xfff; }
 void Core::queue_dual(uint16_t* target, uint32_t value) { dual_ptr[0] = target; dual_value[0] = value & 0xffffff; }
+void Core::set_pointer(uint16_t* target, uint16_t value) {
+    if (options.queued_pointer_load) queue_single(target, value);
+    else *target = value;
+}
 
 void Core::pipeline() {
     if (dual_ptr[1]) { dual_ptr[1][0] = dual_value[1] & 0xfff; dual_ptr[1][1] = (dual_value[1] >> 12) & 0xfff; }
@@ -320,8 +324,8 @@ void Core::primary(uint32_t word) {
     case 0x3c: alu(word, flag8 ? OpSub : OpAdd); break;
     case 0x3d: alu(word, flag8 ? OpOr : OpAnd); break;
     case 0x3e:
-        if (flag8) unknown[word & 0xffc00000]++;
-        else alu(word, OpXor);
+        if (flag8 && !options.compare_3e) unknown[word & 0xffc00000]++;
+        else alu(word, flag8 ? OpCmp : OpXor);
         break;
 
     case 0x40: case 0x41: case 0x44: case 0x45: case 0x48: case 0x49: case 0x4c: case 0x4d: {
@@ -507,13 +511,13 @@ void Core::secondary(uint32_t word) {
         if (flag8) cmem[cmem_operand(word)] = s24(mac_lower(mac_d2[flag4]));
         else dmem[dmem_operand(word)] = s24(mac_lower(mac_d2[flag4]));
         break;
-    case 0x04: da[flag8] = (uint16_t)(acc[flag4] & 0xfff); break;
-    case 0x05: ca[flag8] = (uint16_t)(acc[flag4] & 0xfff); break;
+    case 0x04: set_pointer(&da[flag8], acc[flag4] & 0xfff); break;
+    case 0x05: set_pointer(&ca[flag8], acc[flag4] & 0xfff); break;
     case 0x06: {
         uint32_t value = (uint32_t)cmem[cmem_operand(word)];
         uint16_t* pair = args == 0 ? da : args == 1 ? dir : args == 2 ? ca : cir;
-        pair[0] = value & 0xfff;
-        pair[1] = (value >> 12) & 0xfff;
+        if (options.queued_pointer_load) queue_dual(pair, value);
+        else { pair[0] = value & 0xfff; pair[1] = (value >> 12) & 0xfff; }
         break;
     }
     case 0x07: {
@@ -521,8 +525,8 @@ void Core::secondary(uint32_t word) {
         cmem[cmem_operand(word)] = s24((uint32_t)pair[1] << 12 | pair[0]);
         break;
     }
-    case 0x08: (flag4 ? dir : da)[flag8] = (uint16_t)(cmem[cmem_operand(word)] & 0xfff); break;
-    case 0x09: (flag4 ? cir : ca)[flag8] = (uint16_t)(cmem[cmem_operand(word)] & 0xfff); break;
+    case 0x08: set_pointer(&(flag4 ? dir : da)[flag8], cmem[cmem_operand(word)] & 0xfff); break;
+    case 0x09: set_pointer(&(flag4 ? cir : ca)[flag8], cmem[cmem_operand(word)] & 0xfff); break;
     case 0x0a: case 0x0b: {
         uint16_t* regs[4][2] = {{&da[0], &ca[0]}, {&dir[0], &cir[0]}, {&da[1], &ca[1]}, {&dir[1], &cir[1]}};
         cmem[cmem_operand(word)] = *regs[args][op == 0x0b];
