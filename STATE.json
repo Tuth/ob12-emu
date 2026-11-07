@@ -99,7 +99,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "A-014 The Raver click: DASP1 control stage 018-021 (on only in this program, C03A-C03E) saturates at voice start; check 79 constant alignment and which timbre parameter sets C03A-C03E",
+    "A-014 The Raver click: glide stage C03A-C03E on DASP1; first write C03A=A2AE92 for 0.6 ms before the rest drives it to the rail; check host write timing/order against the Slave code",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
     "Display font: large program name is Handel Gothic (E:/dl/handelgotdlig-regular.zip, Thor); small font nearly right",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",

@@ -1940,3 +1940,15 @@ differs (the alignment of the `79` constant against the products, or the MAC shi
 stage is probably what Thor hears as the strange slide. Next: the role of C03A-C03E from the Slave
 side (which timbre parameter writes them), and the `79` alignment checked against another
 program that uses the stage without clicking.
+
+### The Raver: the stage is its glide, and the first write is a transient (measured)
+
+Host writes to DASP1 C03A-C03E (`OB12_HOST_LOG`): at the voice start 19.0163 C03A = A2AE92 (-0.72),
+19.0165 C03C 476BE0 and C03D C76BE0, 19.0169 C03A FF3412 and C03B 811041; then C03A alone in small
+steps (FF3181 at 19.0286, FF2CA6 at 19.0390, ...); at the release 20.6411 C03C and C03D to 0. The
+constant term carries the slide and the coefficients its speed: the program's glide.
+
+For the 0.6 ms between the first and the second write the stage runs with the constant -0.72 and
+the old coefficients; that drives it into the rail, and the click follows. Open: whether the real
+DSP sees these writes in the same order and spacing (the host interface timing), or the Slave on
+the unit writes them closer together. Nothing changed.
