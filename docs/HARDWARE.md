@@ -2031,3 +2031,19 @@ Not understood: why the engine and the harness differ with the slot. Candidates:
 a part's held bytes before the slot ages, so the half frame count differs; or a pair other than the
 glide stages now lands together and breaks a sequence the Slave means as two steps. Next time: an
 engine and harness run side by side with the slot, per sample at 19.01-19.03 s, before any fix.
+
+### Font 1 is the program name, drawn in Handel Gothic (measured, from Thor's find)
+
+Which font number draws what: four sectors, each making one bit group of font numbers 16 rows high
+(`make_font.py` heights). Only bit 0 enlarged the program name, and nothing else; bits 1-3 left it
+small. So font 1 is the program name and only that, and 16 rows fill the space the screen leaves
+for it between the header and the part box.
+
+Thor identified the face from a photo of a unit: Handel Gothic (HandelGotDLig Regular, freefonts).
+`make_font.py` now takes a height with p for a proportional font from OB12_FONT_TTF: capitals over
+rows 1 to 12, descenders below, one blank column after each glyph, each glyph its own width in
+the column table. Build:
+`OB12_FONT_TTF="rom/fonts/HandelGotDLig Regular.ttf" python tools/make_font.py rom/font_sector.bin 8,16p,8,8,8,8,8,8,8,8,8,8,8,8,8,8`
+(the TTF lives in rom/fonts, outside git like the ROMs). Copy font_sector.bin into each bundle's rom.
+
+Audio reference unchanged, 12b99e29. Stroke weight against the photo not compared closely.

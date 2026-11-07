@@ -7,6 +7,8 @@
 # bit 0 on top, in a 6 x 8 cell: a blank column and a blank bottom row keep rows and letters
 # apart. 7E and 7F are arrows, as on character LCDs; the firmware prints 7E after NEXT.
 # Other heights are drawn from DejaVu Sans Mono.
+# A height followed by p (e.g. 16p) is drawn proportional from the TTF in OB12_FONT_TTF: font 1, the
+# program name, is Handel Gothic on the unit (Thor). Each glyph then has its own width.
 # usage: make_font.py <out file> [height for each of 16 fonts, comma separated]
 import struct, sys
 import matplotlib
@@ -53,17 +55,41 @@ def glyphs(height):
         cells.append([[image.getpixel((advance + x, height + y)) > 120 for x in range(advance)] for y in range(height)])
     return advance, cells
 
-def font(height):
-    advance, cells = glyphs(height)
-    width = advance * COUNT
+def proportional_glyphs(height):
+    # Capitals take rows 1 to height-4, descenders the last three rows; one blank column after each glyph.
+    ttf = os.environ['OB12_FONT_TTF']
+    size = 4
+    while ImageFont.truetype(ttf, size + 1).getbbox('H')[3] - ImageFont.truetype(ttf, size + 1).getbbox('H')[1] <= height - 4:
+        size += 1
+    f = ImageFont.truetype(ttf, size)
+    top = f.getbbox('H')[1]
+    cells, widths = [], []
+    for code in range(FIRST, FIRST + COUNT):
+        ch = chr(code) if code < 0x7f else ' '
+        w = max(2, int(round(f.getlength(ch)))) + 1
+        image = Image.new('L', (w + 8, height + 8), 0)
+        ImageDraw.Draw(image).text((2, 1 - top + 2), ch, font=f, fill=255)
+        cells.append([[image.getpixel((2 + x, 2 + y)) > 110 for x in range(w)] for y in range(height)])
+        widths.append(w)
+    return widths, cells
+
+def font(height, proportional=False):
+    if proportional:
+        widths, cells = proportional_glyphs(height)
+    else:
+        advance, cells = glyphs(height)
+        widths = [advance] * COUNT
+    advance = max(widths)
+    columns = [0]
+    for w in widths: columns.append(columns[-1] + w)
+    width = columns[-1]
     words = (width + 15) // 16
-    columns = [i * advance for i in range(COUNT + 1)]
     bitmap = bytearray(words * 2 * height)
     for i, cell in enumerate(cells):
         for y in range(height):
-            for x in range(advance):
+            for x in range(widths[i]):
                 if cell[y][x]:
-                    c = i * advance + x
+                    c = columns[i] + x
                     at = y * words * 2 + (c >> 4) * 2
                     word = struct.unpack_from('<H', bitmap, at)[0] | (0x8000 >> (c & 15))
                     struct.pack_into('<H', bitmap, at, word)
@@ -78,7 +104,7 @@ def font(height):
     struct.pack_into('<h', header, 0x20, 0x24 + len(columns) * 2)
     return bytes(header) + b''.join(struct.pack('<H', c) for c in columns) + bytes(bitmap)
 
-heights = [int(h) for h in sys.argv[2].split(',')] if len(sys.argv) > 2 else [8] * 16
+heights = sys.argv[2].split(',') if len(sys.argv) > 2 else ['8'] * 16
 table = 16 * 4
 body = bytearray()
 offsets = []
@@ -88,7 +114,7 @@ for h in heights:
         if len(body) & 1:
             body.append(0)
         made[h] = table + len(body)
-        body += font(h)
+        body += font(int(h.rstrip('p')), h.endswith('p'))
     offsets.append(made[h])
 sector = b'\xff\xff' + b''.join(struct.pack('<I', o) for o in offsets) + bytes(body)
 assert len(sector) < 0xa000
