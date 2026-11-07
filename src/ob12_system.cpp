@@ -403,6 +403,11 @@ int main(int argc, char** argv) {
             if (*p == ',') p++;
         }
     }
+    // study: OB12_PC_RMS=chip,from,to (seconds): per program address, the rms of the D cell each
+    // instruction addresses, after it ran, and of both accumulators. Printed at the end.
+    int pcr_chip = -1; double pcr_from = 0, pcr_to = 0;
+    static double pcr_d[512], pcr_a0[512], pcr_a1[512]; static long pcr_n[512];
+    if (const char* t = getenv("OB12_PC_RMS")) sscanf(t, "%d,%lf,%lf", &pcr_chip, &pcr_from, &pcr_to);
     FILE* cell_log = nullptr;  // per sample: DMEM 256 and CMEM 512 words of one chip
     double cell_from = 0, cell_to = 0;
     int cell_chip = 0;
@@ -414,7 +419,7 @@ int main(int argc, char** argv) {
     long port_count[2] = {};
     try {
         int slice = 167;  // set per half frame below, 16 MHz
-        bool threaded = !getenv("OB12_SERIAL") && !cell_log && !start_trace && watch_d.empty() && !getenv("OB12_WATCH_C") && !getenv("OB12_SLAVE_WIN") && !getenv("OB12_CREADS");
+        bool threaded = !getenv("OB12_SERIAL") && !cell_log && !start_trace && watch_d.empty() && !getenv("OB12_WATCH_C") && !getenv("OB12_SLAVE_WIN") && !getenv("OB12_CREADS") && pcr_chip < 0;
         long long chip_tsc[5] = {};
         Gate cpu_gate, dsp_gate;
         std::atomic<bool> stop_workers{false};
@@ -678,7 +683,13 @@ int main(int argc, char** argv) {
                         else trace_w = 0;
                     }
                     int pc = h.dsp->pc;
+                    uint32_t pcr_cell = (n == pcr_chip && now >= pcr_from && now < pcr_to) ? h.dsp->study_dmem(h.dsp->pmem[pc]) : 0x10000;
                     h.dsp->step();
+                    if (pcr_cell < 0x10000) {
+                        auto norm = [](int32_t v) { return (double)(((int64_t)v << 40) >> 40) / 8388608.0; };
+                        double d = norm(h.dsp->dmem[pcr_cell]), a0 = norm(h.dsp->acc[0]), a1 = norm(h.dsp->acc[1]);
+                        pcr_d[pc] += d * d; pcr_a0[pc] += a0 * a0; pcr_a1[pc] += a1 * a1; pcr_n[pc]++;
+                    }
                     if (trace_w) printf(" -> D %06X A %06X %06X XR %05X xrd %06X\n", h.dsp->dmem[trace_d] & 0xffffff, h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->study_xread(), h.dsp->xrd & 0xffffff);
                     if (creads_on && n == trace_chip && pc == 511) { creads_on = false; creads_done = true; }
                     if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to && ++cell_count % cell_every == 0) {
@@ -807,5 +818,7 @@ int main(int argc, char** argv) {
     m->lcd.save_pbm("build/lcd.pbm");
     m->save_hot("build/hot.txt");
     m->save_ram("build/ram.bin");
+    if (pcr_chip >= 0) for (int i = 0; i < 512; i++) if (pcr_n[i])
+        printf("pcrms %03X %08X D %.4f A0 %.4f A1 %.4f\n", i, host[pcr_chip].dsp->pmem[i], sqrt(pcr_d[i] / pcr_n[i]), sqrt(pcr_a0[i] / pcr_n[i]), sqrt(pcr_a1[i] / pcr_n[i]));
     return 0;
 }

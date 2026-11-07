@@ -2121,3 +2121,19 @@ Thor's VSTHost log: his keyboard's pressure reached 06 of 127 in that take, as D
 Bulk dump reload (manual 10.4): the dump comes back through MIDI IN and runs the UPDATING
 PROCEDURE, flash writes and a reset, so a .syx loader needs the flash kept between sessions and
 the reset modelled.
+
+### Overdrive on DASP4: where the 18 dB comes from (measured, not fixed)
+
+The Overdrive key sends `A8 0F 00`; the Slave then crossfades DASP4 C0EB (dry, 0 to 7FFFFF) against
+C0EA (wet, 7FFFFF to 0) in 1.3 ms steps. `OB12_PC_RMS=4,13.5,14.5` (new study switch: rms per program
+address of the D cell after the word, and of both accumulators) on A-015, overdrive on / off:
+- dry input of the mix (139, `6C003100`): 0.014 either way, about -37 dBFS;
+- the drive stage 118-122 (`2BC02132` sets CR1 bits 9-11, `59402133` accumulates with C133 = 000001,
+  `2B002132` restores) leaves the accumulators at rms 0.70, a near square wave, independent of input;
+- after the tone filters (123-131) and C0E8 = 0.40 (133): wet 0.133, ten times the dry 0.014.
+Master Volume does not explain it: its maximum (`F0 7F 30 04 01 00 7F F7`) writes C0CB = 03513E, the
+power on value, and C0CB is applied at 0F8, before the overdrive. So in the firmware's design the dry
+path runs at about -32 dB there and the fuzz runs at full scale. Whether that matches a unit depends
+on the drive stage: it is a clip made from the rounding mode (CR1 bits 9-11, `round_bits` table
+{0,24,28,30,32,32,28,30}, partly inferred) and a multiply by 2^-23. The next step is to model that
+stage word by word against the TMS57002 rounding definition before changing anything.
