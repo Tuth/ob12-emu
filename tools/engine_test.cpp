@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
     long frames = (long)(seconds * 48000);
     std::vector<int32_t> audio(frames * 2 + 4);
     const uint8_t notes[3][3] = {{0x90, 0x3c, 0x64}, {0x90, 0x40, 0x64}, {0x90, 0x43, 0x64}};
-    double at[3] = {12, 12.5, 13};
+    double at[3] = {13, 13.5, 14};  // notes play from about 12.2 s, after the boot
     long done = 0;
     auto t0 = std::chrono::steady_clock::now();
     for (int i = 0; i <= 3; i++) {

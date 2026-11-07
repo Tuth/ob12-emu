@@ -125,6 +125,7 @@ struct Engine::Impl {
     long batch = 0;
     size_t m_sent = 0, s_sent = 0;
     long k = 0;
+    int slice = 167;  // CPU cycles in this half frame
     Gate cpu_gate, dsp_gate;
     std::atomic<bool> stop{false};
     std::vector<std::thread> workers;
@@ -148,6 +149,7 @@ struct Engine::Impl {
     uint8_t lcd_copy[30 * 64] = {};
     bool lcd_ready = false;
     std::atomic<bool> ready{false};
+    long ready_at = 0;  // half frame the Slave had answered
 
     void take_inputs() {
         if (!input_waiting.exchange(false)) return;
@@ -191,13 +193,13 @@ struct Engine::Impl {
                 lcd_ready = m->lcd.bitmap(lcd_copy);
             }
         }
-        const int slice = 167;
+        slice = k % 3 == 2 ? 166 : 167;  // 16 MHz: 500 cycles per three half frames
         if (one_cpu_thread) {
-            m->run(slice); m->tick(slice - m->cycles_left());
-            s->run(slice); s->tick(slice - s->cycles_left());
+            m->run(slice); m->tick(m->executed());
+            s->run(slice); s->tick(s->executed());
         } else {
             cpu_gate.open(1);
-            s->run(slice); s->tick(slice - s->cycles_left());
+            s->run(slice); s->tick(s->executed());
             cpu_gate.wait();
         }
         if (!error.empty()) throw std::runtime_error(error);
@@ -205,7 +207,7 @@ struct Engine::Impl {
         auto& su = s->link();
         for (; m_sent < mu.head.size(); m_sent++) su.rx_queue.push_back(mu.head[m_sent]);
         for (; s_sent < su.head.size(); s_sent++) mu.rx_queue.push_back(su.head[s_sent]);
-        if (s_sent >= 18) ready.store(true, std::memory_order_relaxed);
+        if (s_sent >= 18 && !ready_at) { ready_at = k; ready.store(true, std::memory_order_relaxed); }
         k++;
     }
 
@@ -299,7 +301,7 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
             wait_for(e.cpu_gate, seen, e.stop);
             if (e.stop) return;
             seen++;
-            try { e.m->run(167); e.m->tick(167 - e.m->cycles_left()); }
+            try { e.m->run(e.slice); e.m->tick(e.m->executed()); }
             catch (const std::exception& error) { e.error = error.what(); }
             e.cpu_gate.done();
         }
@@ -317,6 +319,7 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
 }
 
 Engine::~Engine() {
+    if (getenv("OB12_CLOCK_LOG")) printf("clock: %.6f s of sound, Master %.6f s, Slave %.6f s at 16 MHz, ready at %.4f s\n", impl->k / 96000.0, impl->m->cycles_total / 16e6, impl->s->cycles_total / 16e6, impl->ready_at / 96000.0);
     impl->stop = true;
     for (auto& t : impl->workers) t.join();
     delete impl->m;

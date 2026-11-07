@@ -343,7 +343,7 @@ int main(int argc, char** argv) {
     static double port_sum[5][3][2][2];  // chip, AX1-3, left/right, half frame
     long port_count[2] = {};
     try {
-        const int slice = 167;
+        int slice = 167;  // set per half frame below, 16 MHz
         bool threaded = !getenv("OB12_SERIAL") && !cell_log && !start_trace && watch_d.empty() && !getenv("OB12_WATCH_C") && !getenv("OB12_SLAVE_WIN");
         long long chip_tsc[5] = {};
         Gate cpu_gate, dsp_gate;
@@ -358,7 +358,7 @@ int main(int argc, char** argv) {
                 for (;;) {
                     while (cpu_gate.go.load(std::memory_order_acquire) == seen) { if (stop_workers) return; _mm_pause(); }
                     seen++;
-                    try { m->run(slice); m->tick(slice - m->cycles_left()); }
+                    try { m->run(slice); m->tick(m->executed()); }
                     catch (const std::exception& error) { worker_error = error.what(); }
                     cpu_gate.done();
                 }
@@ -452,6 +452,7 @@ int main(int argc, char** argv) {
         long long tsc_start = __rdtsc();
         auto wall_start = std::chrono::steady_clock::now();
         for (long k = 0; k < total; k++) {
+            slice = k % 3 == 2 ? 166 : 167;
             double now = k / 96000.0;
             clock = now;
             for (auto& e : enc_moves) if (e.detents && now >= e.at) {
@@ -502,7 +503,7 @@ int main(int argc, char** argv) {
             if (threaded) {
                 long long t0 = __rdtsc();
                 cpu_gate.open(1);
-                s->run(slice); s->tick(slice - s->cycles_left());
+                s->run(slice); s->tick(s->executed());
                 long long t1 = __rdtsc();
                 cpu_gate.wait();
                 long long t2 = __rdtsc();
@@ -523,8 +524,8 @@ int main(int argc, char** argv) {
                 }
                 held.clear();
             } else {
-                m->run(slice); m->tick(slice - m->cycles_left());
-                s->run(slice); s->tick(slice - s->cycles_left());
+                m->run(slice); m->tick(m->executed());
+                s->run(slice); s->tick(s->executed());
             }
             auto& mu = m->link();
             auto& su = s->link();

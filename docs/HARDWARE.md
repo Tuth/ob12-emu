@@ -795,7 +795,7 @@ The volume table there also predates the tick.
 Host writes now follow the envelope: at note-on C132 000129, C134 8000E8; at the stage change
 C132 000013, C134 800014; at note-off C132 000000, C134 80011C. Meaning inferred, not traced.
 
-The CPU clock in the harness runs about 4% ahead of sample time: a note sent at 13.00 s shows
+**Fixed**, see "CPU clock exactly 16 MHz" below. The CPU clock in the harness runs about 4% ahead of sample time: a note sent at 13.00 s shows
 13.52 s on `cycles_total`. Not fixed. The tick and pots use sample time.
 
 ## BUS search (measured, not solved)
@@ -1494,3 +1494,62 @@ How to measure from now on: nothing else playing (VSTHost closed or idle), sever
 the offline figure next to the pace figure; a pace result alone does not tell machine from code.
 
 In a real host: VSTHost ran one OB12 at 3.13 cores, near the pace figure.
+
+## CPU clock exactly 16 MHz (measured, fixed)
+
+Correction to "The CPU rise was the machine" above: Thor says the slow state was a YouTube video
+playing in the background, which he then stopped, not VSTHost. Taken as the cause.
+
+The known 4% excess ("The CPU clock in the harness runs about 4% ahead") had two parts:
+- `cpu_device::run` set the budget to the slice each time and dropped the overrun of the last
+  instruction, while `tick()` counted that overrun to the timers. So the core ran more cycles than
+  it was given, every slice.
+- The slice was 167 cycles per half frame, 16.032 MHz. The crystal is 4 MHz and the time-base timer
+  counts 4 machine cycles per oscillator tick, so the machine clock is 16 MHz.
+
+Fixed: the overrun is a debt carried into the next run, `executed()` gives the timers what really
+ran, and the slice goes 167, 167, 166, 500 cycles per three half frames. `OB12_CLOCK_LOG=1` prints
+it at the end of an engine run.
+
+| | Master | Slave |
+|---|---|---|
+| Before, 16 s of sound | 16.434 s, +2.7% | 16.665 s, +4.2% |
+| Now | 16.000021 s | 16.000021 s |
+
+Consequence: the boot takes longer in sample time. The Slave answers at 11.96 s, the first note
+sounds if sent at 12.2 s, and a note at 12.0 s is lost; before the fix it just made it. So
+`engine_test` now sends its three notes at 13, 13.5, 14 s.
+
+New reference, engine and `OB12_MIDI_NOTES=3c,40,43 ob12_system rom 16 13`: MD5
+d2d0db6880111aec99d58203db319e48, byte identical. All three notes sound: 130, 164, 196 Hz.
+
+The real boot time is not known; a 12 s boot is long for an instrument, which may mean something
+in the boot still waits longer than it should. Not looked into.
+
+## Amp envelope checked against its cell (measured)
+
+Thor suspects the envelopes. `tools/env_test` plays note 3C at 13 s for a hold time with pots moved
+at 12.5 s and prints times from the output level. Amp pots alone, other pots at rest:
+
+| Pot | 00 | FF |
+|---|---|---|
+| Attack | 90% at 0.12 s | still rising after 3 s |
+| Release | -40 dB 0.38 s after note off | still sounding 3 s after |
+| Decay, Sustain | output level nearly the same | |
+
+The output level misleads: it carries the filter envelope and the LFOs too. Read at the amp
+cell instead, DASP0 D042 per 0.1 s (`OB12_CELL_PICK=42,232,234`), Attack 00:
+
+| Sustain, Decay | D042 after the attack |
+|---|---|
+| 7F, 00 | 7EFF1A, flat: the top |
+| 00, FF | 6FF060 falling to 4F7037 over 3 s |
+| 00, 00 | 0 within 0.1 s |
+| preset, 00 (Decay pot only) | jumps to 7EFF1A at the stage change |
+| preset, 7F | climbs from 6F8224 by about 0x13C0 per 0.1 s |
+
+So Attack, Decay, Sustain and Release all act on the amp, in the right direction. No fault found.
+The preset sustain is at the top. The attack still ends near 87% of top, below the sustain, as noted
+in "PPG tick rate"; whether the real unit does that is not known. Not changed.
+
+Not checked: the filter envelope. Its attack ramp has no cell yet ("Filters Attack: not found").

@@ -79,7 +79,8 @@
       "Primary 43 multiplies DMEM by the held C word; real reload timer default; MOUT stereo with effects, detuned saw, 12 notes without clipping",
       "Secondary 2D after the primary: LFO phases wrap, AX1 moves, Filter Frequency works in late sustain (A-003, FF over 00 1.45, was 1.00)",
       "Editor size menu 50 to 200%, width kept per user; display font 5 x 7 dot matrix",
-      "CPU rise explained: machine state, not code; current code 13% faster than 81dfb3b on equal terms"
+      "CPU rise explained: machine state, not code; current code 13% faster than 81dfb3b on equal terms",
+      "CPU clock exactly 16 MHz: overrun carried, slices 167/167/166; was +2.7% Master, +4.2% Slave; reference d2d0db68"
     ],
     "blocked": []
   },
@@ -94,6 +95,8 @@
   },
   "audit_queue": [
     "PR #3: secondary 2D order is a fifth finding, send only with approval",
+    "Filter envelope: find its cells and check A, D, S, R like the amp; amp checked, no fault",
+    "Amp attack ends near 87% of top, below the sustain; check against a real unit",
     "KBD Track direction: FF darkens note 48, check against the panel",
     "Bus sum saturation: resonance sweep still wraps without it, check against the real mechanism",
     "AOUT left constant 113",
@@ -104,7 +107,7 @@
     "Live: test by ear with real MIDI; speed up the DSP core; WASAPI or plugin host for lower latency; stop spinning",
     "Find what D0A4, D061 near Nyquist are; explain the factory timbre with word 523 Hz and fundamental 131 Hz",
     "Find whether a real start-up sends A8 0E; what the constant 113 on AOUT is",
-    "Explain A8 49 and A8 4A; fix the 4% CPU clock excess",
+    "Explain A8 49 and A8 4A",
     "Fill the DSP cell column of the panel map",
     "Define the 1FC guard and the real noise sequence and level of secondary 34",
     "Measure channels, timbres and pitch again after the mode fix",
@@ -115,7 +118,8 @@
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
     "Identify Slave reset entry and interrupt vector handling",
     "Reverse the Slave host-bus writes to derive PLD behaviour",
-    "Font: real sizes per number, glyphs above 7F, or a real flash dump"
+    "Font: real sizes per number, glyphs above 7F, or a real flash dump",
+    "Boot: the Slave answers at 11.96 s of sound, first note plays from 12.2 s; real boot time unknown"
   ],
   "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?",
   "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware."

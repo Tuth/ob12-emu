@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
         while (cpu->steps < limit) {
             const int slice = 200;
             cpu->run(slice);
-            cpu->tick(slice - cpu->cycles_left());
+            cpu->tick(cpu->executed());
         }
     } catch (const std::exception& error) {
         printf("STOP: %s\n", error.what());

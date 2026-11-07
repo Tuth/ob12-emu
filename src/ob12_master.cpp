@@ -608,7 +608,7 @@ int main(int argc, char** argv) {
             if (midi_at && cpu->steps >= midi_at) { cpu->midi_in({0x90, 0x3c, 0x64}); midi_at = 0; }
             const int slice = 200;
             cpu->run(slice);
-            cpu->tick(slice - cpu->cycles_left());
+            cpu->tick(cpu->executed());
         }
     } catch (const std::exception& error) {
         printf("STOP: %s\n", error.what());

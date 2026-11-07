@@ -93,9 +93,16 @@ public:
     virtual ~cpu_device() = default;
 
     // Host interface, not part of MAME.
-    void attach(address_space* space) { m_space = space; device_start(); }
+    void attach(address_space* space) { m_space = space; device_start(); *m_icountptr = 0; }
     void reset() { device_reset(); }
-    void run(int cycles) { *m_icountptr = cycles; execute_run(); }
+    // The last instruction overruns the budget; the debt carries into the next run, so over time
+    // the core runs exactly the cycles it is given. executed() is what this run used.
+    void run(int cycles) {
+        s32 debt = *m_icountptr < 0 ? *m_icountptr : 0;
+        *m_icountptr = m_run_from = debt + cycles;
+        if (m_run_from > 0) execute_run();
+    }
+    int executed() const { return m_run_from - *m_icountptr; }
     int cycles_left() const { return *m_icountptr; }
 
 protected:
@@ -131,5 +138,6 @@ protected:
 private:
     address_space* m_space = nullptr;
     s32* m_icountptr = nullptr;
+    s32 m_run_from = 0;
     device_state_entry m_entry;
 };
