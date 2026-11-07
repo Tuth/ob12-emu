@@ -1701,3 +1701,25 @@ A-001, note 3C, then 40 and 43 (`OB12_MIDI_EVENTS`, `OB12_CHIP_LOG`):
   about 1 dB of the rms, a clipped wave made quieter.
 - Whether the real unit does the same is not known. A makeup gain at the output would raise
   normal programs and not touch this clip.
+
+### Maximum resonance runs the filter to the rail (measured, cause open)
+
+Thor, from the real unit: on A-001, maximum Resonance at minimum cutoff self-oscillates at about
+the level of the plain sound, not far above it.
+
+Here, A-001, cutoff pot 00 (`OB12_POT_STEPS=12.5:5:5:00,12.6:5:3:..`), one note, voice bus rms:
+reso 00 -38.1 dBFS, reso FF -13.8 dBFS; at cutoff FF with reso FF -13.4. The level at maximum
+resonance does not depend on the cutoff, and at reso 00 the cutoff does not change the level either
+(-38.1 at 00, 80, FF).
+
+- The Resonance pot writes one cell, DASP0 C12E: 200000 at 00, 000000 at FF.
+- DASP0 trace (`OB12_TRACE_CHIP=0`): 11F `916C9A4F` is a dual word; its paired half `6C801A4F`
+  is MAC -= C12E x D4F, the damping term of a state variable filter, the main half loads C12E into
+  ACC1. Integrators: D9D and D4F with C0D7, a second section D9E and D50 with C0D8.
+- So at FF the firmware makes the first section lossless. Filter states per ms, 0.3-1.0 s after the
+  note, peak and rms of full scale: reso 00 D9D 14/4%, D4F 6/3%, D9E 13/5%, D50 4/2%; reso FF D9D
+  86/53%, D4F 83/53%, D9E 100/75% (at the rail 30% of the time), D50 100/51%.
+
+The damping step decodes as the firmware means it. What holds a lossless section at a moderate
+level on the real chip is not known: saturation or truncation in the integrators, or the second
+section. Open, nothing changed.

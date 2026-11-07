@@ -266,6 +266,7 @@ int main(int argc, char** argv) {
     double creads_at = getenv("OB12_CREADS") ? atof(getenv("OB12_CREADS")) : 0;  // study: list DASP4 multiply operands once at t
     bool creads_done = false;
     bool creads_on = false, trace_all = getenv("OB12_TRACE4_ALL") != nullptr;
+    int trace_chip = getenv("OB12_TRACE_CHIP") ? atoi(getenv("OB12_TRACE_CHIP")) : 4;  // which DSP OB12_CREADS traces
     // study: OB12_SLAVE_SYSEX=t:F07E04...F7 sends these hex bytes straight to the Slave at t
     double slave_sysex_at = -1;
     std::vector<u8> slave_sysex;
@@ -633,9 +634,9 @@ int main(int argc, char** argv) {
                 if (h.running) for (int i = 0; i < 256; i++) {
                     // study: one whole sample of DASP4, from PC 0 after t. OB12_TRACE4_ALL=1 prints every
                     // word with the D cell after it ran and the XMEM read address; else multiplies only.
-                    if (creads_at > 0 && n == 4 && now >= creads_at && !creads_done && h.dsp->pc == 0) creads_on = true;
+                    if (creads_at > 0 && n == trace_chip && now >= creads_at && !creads_done && h.dsp->pc == 0) creads_on = true;
                     uint32_t trace_w = 0, trace_d = 0;
-                    if (creads_on && n == 4) {
+                    if (creads_on && n == trace_chip) {
                         trace_w = h.dsp->pmem[h.dsp->pc];
                         uint32_t op = (trace_w >> 24) & 0xff;
                         trace_d = h.dsp->study_dmem(trace_w);
@@ -649,7 +650,7 @@ int main(int argc, char** argv) {
                     int pc = h.dsp->pc;
                     h.dsp->step();
                     if (trace_w) printf(" -> D %06X A %06X %06X XR %05X xrd %06X\n", h.dsp->dmem[trace_d] & 0xffffff, h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->study_xread(), h.dsp->xrd & 0xffffff);
-                    if (creads_on && n == 4 && pc == 511) { creads_on = false; creads_done = true; }
+                    if (creads_on && n == trace_chip && pc == 511) { creads_on = false; creads_done = true; }
                     if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to && ++cell_count % cell_every == 0) {
                         if (!cell_pick.empty()) { for (int c : cell_pick) fwrite(c < 256 ? &h.dsp->dmem[c] : &h.dsp->cmem[c - 256], 4, 1, cell_log); }
                         else { fwrite(h.dsp->dmem, 4, 256, cell_log); fwrite(h.dsp->cmem, 4, 512, cell_log); }

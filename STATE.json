@@ -95,7 +95,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Output level: programs at -28 dBFS rms; max resonance clips inside DASP4 before Master Volume; decide output trim",
+    "Max resonance: firmware sets damping C12E = 0, filter states run to the rail; real unit stays near plain level at min cutoff (Thor). Find the limiting mechanism",
     "Delay: measure echo time against TIME and repeats against FEEDBACK on more programs",
     "Encoder: three detents at once step four programs",
     "PR #3: secondary 2D order is a fifth finding, send only with approval",
