@@ -99,7 +99,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "A-014 The Raver click: glide offset lost because C03A (rate) lands one sample before C03B (pole); check Slave instruction timing vs the unit, or DSP host write take-in point",
+    "A-014 The Raver click: firmware write race (C03A/C03B one word apart, DSP needs them in one sample); clicks on about every second legato change; decide firmware-true vs grouped host take-in",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
     "Display font: large program name is Handel Gothic (E:/dl/handelgotdlig-regular.zip, Thor); small font nearly right",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",

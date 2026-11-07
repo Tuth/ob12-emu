@@ -1993,3 +1993,21 @@ effect together. In the model they land one sample apart. Candidates: the f2mc16
 cycle counts (MAME tables, approximations) make the Slave slower than the unit, or the DSP host
 interface takes writes in at another point. The earlier 29-sample theory is retracted: with C03B 0
 the stage copies C03A and does not accumulate it. Not fixed.
+
+### The Raver: a race in the firmware's write order (measured, decision open)
+
+Host writes timed to the microsecond (`OB12_SERIAL`, host log at 6 decimals, a study change since
+reverted): the Slave's word writes land one per half frame, about 10.4 us apart, as one five byte
+word takes it about 160 cycles. C03A at 19.016875, C03B at 19.016885. The DSP reads them back to
+back (01B, 01C) in the first half of each sample. So a pair whose C03A lands at a sample's start
+loses the offset; one whose C03A lands mid-sample keeps it.
+
+Eight legato changes on The Raver, four with a glide pair: the offset was lost at 19.017 and 23.396 s
+(C03A in a first half), kept at 20.476 and 21.936 s (second half). So the click comes about every
+second legato change, as Thor heard: not every time.
+
+Neither order is safe: C03A first loses the offset; C03B first drives the state to -1.45 for a sample.
+On the unit either the same race clicks at random, or the TMS57070 host interface takes words in a
+way that hides it (buffering a group and taking it in at once). The "TMS57070 basic info" document
+has no detail on the host interface. Not changed; a decision is open between staying firmware-true
+and modelling a take-in that applies a Slave burst together.

@@ -246,7 +246,7 @@ private:
         for (int chip = 0; chip < 5; chip++)
             if (selected & (1 << chip)) dsp_stream[chip].push_back(data);
         if (!selected) unselected_bytes++;
-        if (byte_log) fprintf(byte_log, "%06X %02X %02X\n", pc, selected, data);  // study: OB12_DSP_BYTE_LOG
+        if (byte_log) fprintf(byte_log, "%06X %02X %02X %lld\n", pc, selected, data, (long long)cycles_total);  // study: OB12_DSP_BYTE_LOG
         if (on_dsp_byte) on_dsp_byte(selected, data);
     }
 
