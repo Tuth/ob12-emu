@@ -3,7 +3,10 @@
 # +12 first char, +14 char count, +16 row width in words, +18 height, +1C advance,
 # +1E offset of u16 column table, +20 offset of bitmap. A glyph spans columns table[i]..table[i+1];
 # column x is bit 15 - (x & 15) of little endian word x >> 4. Row stride is the row width.
-# The glyphs are drawn from DejaVu Sans Mono, not the original font, which is lost here.
+# The original font is lost. Height 8 uses a classic 5 x 7 dot matrix set, one column per byte,
+# bit 0 on top, in a 6 x 8 cell: a blank column and a blank bottom row keep rows and letters
+# apart. 7E and 7F are arrows, as on character LCDs; the firmware prints 7E after NEXT.
+# Other heights are drawn from DejaVu Sans Mono.
 # usage: make_font.py <out file> [height for each of 16 fonts, comma separated]
 import struct, sys
 import matplotlib
@@ -13,7 +16,32 @@ import os
 TTF = os.path.join(os.path.dirname(matplotlib.__file__), 'mpl-data', 'fonts', 'ttf', 'DejaVuSansMono.ttf')
 FIRST, COUNT = 0x20, 0x60
 
+DOTS = bytes.fromhex(
+    '0000000000 00005F0000 0007000700 147F147F14 242A7F2A12 2313086462 3649552250 0005030000'
+    '001C224100 0041221C00 14083E0814 08083E0808 0050300000 0808080808 0060600000 2010080402'
+    '3E5149453E 00427F4000 4261514946 2141454B31 1814127F10 2745454539 3C4A494930 0171090503'
+    '3649494936 064949291E 0036360000 0056360000 0814224100 1414141414 0041221408 0201510906'
+    '324979413E 7E1111117E 7F49494936 3E41414122 7F4141221C 7F49494941 7F09090901 3E4149497A'
+    '7F0808087F 00417F4100 2040413F01 7F08142241 7F40404040 7F020C027F 7F0408107F 3E4141413E'
+    '7F09090906 3E4151215E 7F09192946 4649494931 01017F0101 3F4040403F 1F2040201F 3F4038403F'
+    '6314081463 0708700807 6151494543 007F414100 0204081020 0041417F00 0402010204 4040404040'
+    '0001020400 2054545478 7F48444438 3844444420 384444487F 3854545418 087E090102 0C5252523E'
+    '7F08040478 00447D4000 2040443D00 7F10284400 00417F4000 7C04180478 7C08040478 3844444438'
+    '7C14141408 081414187C 7C08040408 4854545420 043F444020 3C4040207C 1C2040201C 3C4030403C'
+    '4428102844 0C5050503C 4464544C44 0008364100 00007F0000 0041360800 08082A1C08 081C2A0808'.replace(' ', ''))
+
+
+def dot_glyphs():
+    cells = []
+    for i in range(COUNT):
+        columns = DOTS[i * 5:i * 5 + 5] + b'\0'
+        cells.append([[bool(columns[x] >> y & 1) for x in range(6)] for y in range(8)])
+    return 6, cells
+
+
 def glyphs(height):
+    if height == 8:
+        return dot_glyphs()
     # Baseline one row above the bottom, for descenders; capitals fill the rest.
     size = round((height - 1) / 0.73)
     font = ImageFont.truetype(TTF, size)

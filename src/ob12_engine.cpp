@@ -274,6 +274,7 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     options.queued_pointer_load = true;
     options.bus_sum_saturates = true;
     options.reuse_coefficient = true;
+    options.late_saturation_mode = true;
 
     e.m = new master::Master();
     e.s = new slave::Slave();

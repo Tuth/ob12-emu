@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Effects run by default, right channel alive: primary 43 reuses the last C; PR #3 finding 4 corrected upstream",
+    "phase": "LFOs run for the first time: secondary 2D after the primary; cutoff no longer pinned; editor size menu; 5 x 7 font",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -76,7 +76,9 @@
       "Two half frames per gate: 2.21 x offline, output identical; load about 4.5 cores, floor near 3",
       "Bus wrap from Thor recording: six voice output adds saturate; 0 flips, 3 note run identical",
       "FC0400 is reload timer 1; glide step modelled, Timeless LD follows the keys",
-      "Primary 43 multiplies DMEM by the held C word; real reload timer default; MOUT stereo with effects, detuned saw, 12 notes without clipping"
+      "Primary 43 multiplies DMEM by the held C word; real reload timer default; MOUT stereo with effects, detuned saw, 12 notes without clipping",
+      "Secondary 2D after the primary: LFO phases wrap, AX1 moves, Filter Frequency works in late sustain (A-003, FF over 00 1.45, was 1.00)",
+      "Editor size menu 50 to 200%, width kept per user; display font 5 x 7 dot matrix"
     ],
     "blocked": []
   },
@@ -90,10 +92,12 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "PR #3: secondary 2D order is a fifth finding, send only with approval",
+    "KBD Track direction: FF darkens note 48, check against the panel",
+    "CPU: pace 5.43 cores, was 3.29; cause not found, not 2D order or font",
     "Bus sum saturation: resonance sweep still wraps without it, check against the real mechanism",
     "AOUT left constant 113",
     "CPU: faster step() is what lowers the floor",
-    "Font polish: selected rows, real font sizes per number, glyphs above 7F, or a real flash dump",
     "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
     "Later, at Thor's request: model the analog output path, sheets 11-15; output is taken digitally from DASP4 AX2 today",
@@ -110,7 +114,8 @@
     "Find the Slave loader that reads FC2340 and settle the 12-byte header and entries 5-9",
     "Find what the Slave calls at FFD3A0, FFD215, FFD12E, FFD1BD and design a replacement boot",
     "Identify Slave reset entry and interrupt vector handling",
-    "Reverse the Slave host-bus writes to derive PLD behaviour"
+    "Reverse the Slave host-bus writes to derive PLD behaviour",
+    "Font: real sizes per number, glyphs above 7F, or a real flash dump"
   ],
   "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?",
   "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware."

@@ -1218,6 +1218,8 @@ drawing, so from the first note the WAV differs from the old reference: new MD5
 17c551a0a8e1d2eeef7d49160f9b9c1a, the same in `ob12_system` and the engine, RMS 10130 against 10121.
 The old hash holds only without `rom/font_sector.bin`.
 
+**Superseded** by "Editor size and display font" below.
+
 Open: selected rows look heavy and some of their letters merge; zero is drawn as an O; the
 original font's sizes and shapes are unknown; characters above 7F have no glyphs.
 
@@ -1391,3 +1393,69 @@ Correction for PR #3: sent 2026-11-07, text in `docs/PR3-CORRECTION.md`. Public 
 against the own core with `OB12_CMP_PR=1`: 81.92M steps identical, loaded and live CMEM, failures 0.
 Control, the sent patch against the same core: mismatches at 0DD, 1BF, 0E8, 5 failures. Program 4
 with live CMEM did not differ in that control at 2000 frames, so that run does not exercise 43.
+
+## Secondary 2D acts after the primary: the LFOs run (firmware evidence, not checked on silicon)
+
+Thor's report: program A-003 JMJ Journey, timbre A-108 OB Sweep ak. Once the sound settles, Filter
+Frequency and KBD Track do nothing, Resonance still works. Thor suspected the cutoff was pinned at
+the top. Measured, that was right.
+
+Reproduced with two runs, the same but for one pot at 50 s, compared at equal times so slow
+modulation cancels (`tools/ab_centroid.py`), MOUT left, spectral centroid, 52 to 66 s:
+
+| Model | Pot 00 | Pot FF | FF over 00 |
+|---|---|---|---|
+| Before | 1337 Hz | 1337 Hz | 1.00, FF never higher |
+| Now | 472 Hz | 884 Hz | 1.45, FF higher 97% of the time |
+
+The path, followed down:
+- The messages arrive. A0 3C reaches the Slave and DASP0 C01A, C014 get written late too.
+- DASP0 C0D7 follows the pot, then stays at 1FA4F3, the top of its exponent table, 100% of the time
+  from about 4 s after the note. Pot 00 or FF: same value. I read C0D7 as a cutoff term: it moves
+  with Frequency and tops out here. Its exact role is not decoded.
+- What pushed it there is the LFO term, multiplied up by LFO1 Fade, D010, which reaches 7FFFFF. With
+  the LFO frozen near full scale that is a DC offset.
+- **No LFO in this emulation has ever moved.** DASP4 AX1, the LFO bus back to DASP0, was identical
+  sample for sample from 20 to 60 s, in all 24 slots.
+- DASP4 keeps LFO phases at D0D3, D0D7 and on, stride 4. All sat at 7FFFFF. The phase add is 014
+  `3C2D7040`, after 013 `116D3100`: saturation on, then the add with secondary 2D turning it off.
+
+Finding: 2D has to act after the primary of its word, like 28-2B, or the phase add saturates instead
+of wrapping. Same in DASP4 at 041, 042. Option `late_saturation_mode`, on by default,
+`OB12_EARLY_2D=1` for the old order. The public emulator has the old order too, so this is a fifth
+finding for PR #3, not sent.
+
+Result: AX1 left swings -8.34M to +8.34M, AX1 right slots 886509 to 4942173. C0D7 on A-003, late:
+0AE459 to 13A86C at pot 00, 169A14 to the top at FF, 0 to 31% of the time at the top. KBD Track late,
+note 48: centroid 1985 Hz at 00, 389 Hz at FF. Note the direction: FF darkens, not explained.
+Resonance late: 225 Hz at 00, 2075 Hz at FF.
+
+**So all sound so far had no LFO at all.** Vibrato, filter sweeps, PWM by LFO, anything on the LFO bus
+stood still at one value, and programs with depth got a fixed offset instead.
+
+Notes 3C, 40, 43: MOUT RMS 561180, 440436. 12 notes, no pots: peaks 6226484, 5941738, no clipping, no
+flips; that is twice the level before, as LFO now moves levels. Maximum resonance sweep: no flips
+with bus saturation, top 72%, 66%; without it 356, 382 flips at the bus, so `bus_sum_saturates`
+stays and 2D order does not explain it.
+
+Reference with the new font: MD5 d620434501e83a6b6bb4591adfd94d3f, `ob12_system` and the engine agree.
+
+## Editor size and display font (measured)
+
+Right click on the panel: 50, 67, 75, 100, 125, 150, 200%. The plugin asks the host by resizeView and
+falls back to its own resize if the host does not call back. The width is kept in
+`%LOCALAPPDATA%\OB12\editor_width.txt`. Smoke test: 750, 1005 with a silent host, 3000, 1500, and a new
+view opens at the saved size. Not tried by hand in a host yet. `OB12_BUNDLE_ROOT` builds beside a
+bundle a running host has locked.
+
+Font: `tools/make_font.py` now uses a classic 5 x 7 dot matrix set in a 6 x 8 cell for height 8, not
+thresholded DejaVu. The blank row and column keep rows and letters apart, zero has its slash, so the
+display reads "OB Sweep", which was "08 Sweep" before. 7E and 7F are drawn as arrows, as on
+character LCDs; the firmware prints 7E after NEXT. That is inferred. The original font is still
+unknown, and characters above 7F still have no glyphs.
+
+CPU, unexplained: pace test now 5.43 cores, 0 ring empties, engine 1.8 x real time. The last round
+gave 3.29 cores and 2.35 x. Not the 2D order and not the font: A/B with the same binary gave 1.75 and
+1.71, and 1.73 with the old font. Not other load: the machine was idle and the core alone still runs
+20 ns a step. A second PGO run gave the same. VSTHost was open during the earlier figure, which may
+matter or not; untested.

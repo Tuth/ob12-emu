@@ -30,6 +30,7 @@
 //   OB12_LIVE_MS=n   buffer length in ms, default 10; OB12_LIVE_BUFFERS=n, default 6
 //   OB12_LIVE_MIDI=d  take notes from MIDI input device d; OB12_LIVE_MIDI=list prints them
 //   OB12_NO_RELOAD=1  no reload timer 1: dry sound, glide only
+//   OB12_EARLY_2D=1  secondary 2D before the primary: all LFOs stand still
 //   OB12_MACLO=1     primary 43 as low MAC word multiply, the old model
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
 //   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
@@ -180,6 +181,7 @@ int main(int argc, char** argv) {
     options.compare_3e = getenv("OB12_NO_3E") == nullptr;
     options.bus_sum_saturates = getenv("OB12_BUS_WRAP") == nullptr;
     options.reuse_coefficient = getenv("OB12_MACLO") == nullptr;
+    options.late_saturation_mode = getenv("OB12_EARLY_2D") == nullptr;
     options.maclo_shift = getenv("OB12_MACLO_NO_SHIFT") == nullptr;
     options.maclo_unsigned = getenv("OB12_MACLO_SIGNED") == nullptr;
     options.queued_pointer_load = getenv("OB12_EARLY_POINTER") == nullptr;
@@ -334,6 +336,7 @@ int main(int argc, char** argv) {
     FILE* cell_log = nullptr;  // per sample: DMEM 256 and CMEM 512 words of one chip
     double cell_from = 0, cell_to = 0;
     int cell_chip = 0;
+    long cell_count = 0, cell_every = getenv("OB12_CELL_EVERY") ? atol(getenv("OB12_CELL_EVERY")) : 1;  // study: every nth frame
     if (const char* range = getenv("OB12_CELL_LOG")) {  // chip,from,to in seconds after the note
         if (sscanf(range, "%d,%lf,%lf", &cell_chip, &cell_from, &cell_to) == 3) cell_log = fopen("build/cells.bin", "wb");
     }
@@ -577,7 +580,7 @@ int main(int argc, char** argv) {
                 if (h.running) for (int i = 0; i < 256; i++) {
                     int pc = h.dsp->pc;
                     h.dsp->step();
-                    if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to) {
+                    if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to && ++cell_count % cell_every == 0) {
                         if (!cell_pick.empty()) { for (int c : cell_pick) fwrite(c < 256 ? &h.dsp->dmem[c] : &h.dsp->cmem[c - 256], 4, 1, cell_log); }
                         else { fwrite(h.dsp->dmem, 4, 256, cell_log); fwrite(h.dsp->cmem, 4, 512, cell_log); }
                     }

@@ -683,7 +683,7 @@ void Core::step() {
         post_increment(word);
     } else {
         uint32_t op = (word >> 16) & 0x3f;
-        if (options.late_mode_change && op >= 0x28 && op <= 0x2b) {
+        if (options.late_mode_change && ((op >= 0x28 && op <= 0x2b) || (options.late_saturation_mode && op == 0x2d))) {
             primary(word);
             secondary(word);
         } else {
