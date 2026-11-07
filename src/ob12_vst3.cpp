@@ -130,6 +130,24 @@ struct Instrument {
 
 class Plugin;
 
+// Diagnostic: what the host sends, the first 2000 lines, in %LOCALAPPDATA%\OB12\midi_log.txt.
+// Written only when that folder holds a file named midi_log.on.
+static FILE* midi_log() {
+    static FILE* f = nullptr;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        if (const char* base = getenv("LOCALAPPDATA")) {
+            std::string folder = std::string(base) + "\\OB12";
+            if (GetFileAttributesA((folder + "\\midi_log.on").c_str()) != INVALID_FILE_ATTRIBUTES)
+                f = fopen((folder + "\\midi_log.txt").c_str(), "w");
+        }
+    }
+    static int lines = 0;
+    if (f && ++lines > 2000) { fclose(f); f = nullptr; }
+    return f;
+}
+
 constexpr int min_editor_width = 600;
 
 // The chosen size is the user's, so it lives per user, not in the project.
@@ -307,6 +325,7 @@ public:
     uint32 PLUGIN_API getProcessContextRequirements() override { return 0; }
 
     tresult PLUGIN_API getMidiControllerAssignment(int32 bus, int16, CtrlNumber number, ParamID& id) override {
+        if (FILE* f = midi_log()) { fprintf(f, "mapping bus %d controller %d\n", bus, number); fflush(f); }
         if (bus != 0 || number < 0 || number >= midi_params) return kResultFalse;
         id = (ParamID)number;
         return kResultTrue;
@@ -365,6 +384,15 @@ public:
             }
             std::stable_sort(list.begin(), list.end(), [](const Message& a, const Message& b) { return a.offset < b.offset; });
             for (auto& m : list) inst->engine->midi(m.bytes, m.count);
+            if (FILE* f = midi_log()) {
+                for (auto& m : list) fprintf(f, "midi %02X %02X %02X\n", m.bytes[0], m.bytes[1], m.count > 2 ? m.bytes[2] : 0);
+                if (data.inputEvents) for (int32 i = 0; i < data.inputEvents->getEventCount(); i++) {
+                    Event e{};
+                    if (data.inputEvents->getEvent(i, e) == kResultOk && e.type != Event::kNoteOnEvent && e.type != Event::kNoteOffEvent)
+                        fprintf(f, "event type %d\n", e.type);
+                }
+                if (!list.empty()) fflush(f);
+            }
         }
         if (data.numSamples <= 0 || data.numOutputs < 1 || !data.outputs || data.outputs[0].numChannels < 1) return kResultOk;
         auto& out = data.outputs[0];
