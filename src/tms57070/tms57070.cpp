@@ -20,7 +20,7 @@ inline uint32_t u24(int32_t value) { return (uint32_t)value & 0xffffff; }
 const uint64_t LOW24 = 0xffffff;
 }  // namespace
 
-Core::Core(const Options& chosen) : xmem(0x10000, 0), options(chosen) { reset(); }
+Core::Core(const Options& chosen) : xmem(chosen.xmem_words > 0x10000 ? chosen.xmem_words : 0x10000, 0), options(chosen) { reset(); }
 
 void Core::reset() {
     pc = 0;
@@ -123,6 +123,7 @@ uint32_t Core::xmem_index(uint32_t address) const {
     static const uint32_t sizes[4] = {0x4000, 0x8000, 0x10000, 0x10000};
     uint32_t size = sizes[field(CR3, 17, 2)];
     if (flag(CR3, XWORD)) size >>= 1;
+    if (options.xmem_words) size = options.xmem_words;
     return (address + xoff) & (size - 1);
 }
 

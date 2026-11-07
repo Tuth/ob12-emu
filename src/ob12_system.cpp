@@ -31,6 +31,8 @@
 //   OB12_LIVE_MS=n   buffer length in ms, default 10; OB12_LIVE_BUFFERS=n, default 6
 //   OB12_LIVE_MIDI=d  take notes from MIDI input device d; OB12_LIVE_MIDI=list prints them
 //   OB12_NO_RELOAD=1  no reload timer 1: dry sound, glide only
+//   OB12_XREAD_CANCEL=1  a new XMEM read cancels the pending one (old model)
+//   OB12_XMEM_CR3=1  DASP4 XMEM size from CR3 (32K words) instead of the board's 128K
 //   OB12_EARLY_2D=1  secondary 2D before the primary: all LFOs stand still
 //   OB12_MACLO=1     primary 43 as low MAC word multiply, the old model
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
@@ -183,7 +185,7 @@ int main(int argc, char** argv) {
     options.bus_sum_saturates = getenv("OB12_BUS_WRAP") == nullptr;
     options.reuse_coefficient = getenv("OB12_MACLO") == nullptr;
     options.late_saturation_mode = getenv("OB12_EARLY_2D") == nullptr;
-    options.xread_flush = getenv("OB12_XREAD_FLUSH") != nullptr;
+    options.xread_flush = getenv("OB12_XREAD_CANCEL") == nullptr;
     options.maclo_shift = getenv("OB12_MACLO_NO_SHIFT") == nullptr;
     options.maclo_unsigned = getenv("OB12_MACLO_SIGNED") == nullptr;
     options.queued_pointer_load = getenv("OB12_EARLY_POINTER") == nullptr;
@@ -215,7 +217,10 @@ int main(int argc, char** argv) {
     m->reset(); s->reset();
 
     Host host[5];
-    for (auto& h : host) h.dsp = new tms::Core(options);
+    // DASP4 has 3 x 44C256 DRAM, 256K x 12 bits: 128K words of 24 bits in two accesses.
+    tms::Options options4 = options;
+    if (!getenv("OB12_XMEM_CR3")) options4.xmem_words = 0x20000;
+    for (int n = 0; n < 5; n++) host[n].dsp = new tms::Core(n == 4 ? options4 : options);
     double clock = 0;
     FILE* host_log = getenv("OB12_HOST_LOG") ? fopen(getenv("OB12_HOST_LOG"), "w") : nullptr;
     FILE* port_log = getenv("OB12_PORT_LOG") ? fopen("build/ports.raw", "wb") : nullptr;
@@ -632,8 +637,11 @@ int main(int argc, char** argv) {
                         trace_w = h.dsp->pmem[h.dsp->pc];
                         uint32_t op = (trace_w >> 24) & 0xff;
                         trace_d = h.dsp->study_dmem(trace_w);
-                        if (trace_all || (op >= 0x40 && op <= 0x71 && !(op >= 0x68 && op <= 0x6b)))
+                        if (trace_all || (op >= 0x40 && op <= 0x71 && !(op >= 0x68 && op <= 0x6b))) {
                             printf("creads %03X %08X C%03X %06X D%02X %06X", h.dsp->pc, trace_w, h.dsp->study_cmem(trace_w), h.dsp->cmem[h.dsp->study_cmem(trace_w)] & 0xffffff, trace_d, h.dsp->dmem[trace_d] & 0xffffff);
+                            if (op == 0x39 && (trace_w & 0x400000))  // XMEM write: the index it lands on
+                                printf(" XW %05X", h.dsp->study_xmem((uint32_t)h.dsp->cmem[h.dsp->study_cmem(trace_w)]));
+                        }
                         else trace_w = 0;
                     }
                     int pc = h.dsp->pc;

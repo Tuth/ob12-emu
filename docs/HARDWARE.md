@@ -1637,3 +1637,40 @@ the D cell after, ACC, the XMEM read address and XRD.
 
 Next: why the taps never meet the writes: XMEM size and the 12-bit DRAM bus (3 x 44C256, 256K x 12),
 `xoff` stepping, and where the read pairs land.
+
+### Canada fixed: DASP4 has 128K words of XMEM, and XMEM reads pipeline (measured, inferred)
+
+The trace with XMEM write indices (`XW`) showed the delay's own writes were never read back: 155
+wrote the same index as 10C, another effect, in the same sample, and the delay read at 167 sat
+5789 samples behind its write but only 2530 behind another effect's. The buffers overlapped.
+
+Why: DASP4 CR3 is 250000, bus field 2 with XWORD, which the core read as 64K halved to 32K words.
+The firmware uses read offsets up to C12F = 010324, beyond 64K. The board has 3 x 44C256 DRAM,
+256K x 12 bits, so 128K words of 24 bits in two accesses. In 32K the buffers wrap onto each other
+four times. Option `xmem_words`, 0x20000 for DASP4 only (`OB12_XMEM_CR3=1` for the old size).
+
+Second: the core kept one XMEM read in flight and a new read cancelled it. The firmware reads tap
+pairs n, n+1 back to back and uses both, which it would not do if the second cancelled the first.
+Option `xread_flush`, now on: a new read first lands the pending one in XRD (`OB12_XREAD_CANCEL=1`
+for the old model).
+
+Canada after note off, MOUT left rms, FEEDBACK poked after the note:
+
+| FEEDBACK | 15.1 s | 15.5 s | 16 s | 17 s |
+|---|---|---|---|---|
+| 0 | 74700 | 1812 | 268 | 134 |
+| 0.25 | 71031 | 15477 | 1291 | 130 |
+| 0.5, Canada's +50 | 73805 | 35249 | 9478 | 1099 |
+| 0.88 | 90957 | 88656 | 59066 | 38239 |
+
+With the 128K alone FEEDBACK acts but 0.5 still grows (98420 to 370830); with both it decays, in
+order of FEEDBACK. Through the engine: 3C sounds at 524 Hz and is gone by 16.5 s, 43 at 18 s sounds
+at 792 Hz and decays, 30 at 22 s at 264 Hz. A-001: all three notes, peak 5354.
+
+New reference d2d0db68 -> 12b99e29202c84dbeeeae1ed2621d50b, engine and `ob12_system` identical.
+Every program with delay, reverb or chorus sounds different now: until this round DASP4's
+effect buffers overwrote each other.
+
+Not checked on silicon: the 128K is from the board's parts, the pipeline from the firmware's use.
+Echo times against the TIME parameter are not measured yet. Superseded: "the old options only hide
+the ring" stands; `OB12_MACLO` and `OB12_EARLY_POINTER` are not the fix.

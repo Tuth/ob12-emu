@@ -26,7 +26,8 @@ struct Options {
     bool maclo_unsigned = false;     // primary 43 takes the low MAC word as unsigned
     bool maclo_shift = false;        // primary 43 product sits 24 bits lower, for double precision
     bool compare_3e = false;         // primary 3E flag 8 compares DMEM with CMEM, flags only
-    bool xread_flush = false;  // study: a new XMEM read completes the pending one first
+    uint32_t xmem_words = 0;  // the board's external RAM in words, a power of two; 0 = from CR3
+    bool xread_flush = false;  // a new XMEM read lands the pending one in XRD first (read pipeline)
     bool late_saturation_mode = false;  // secondary 2D acts after the primary, like 28-2B
     bool reuse_coefficient = false;  // primary 43 multiplies DMEM by the last multiplier C word
     bool bus_sum_saturates = false;  // the OB-12 voice output adds clip instead of wrapping

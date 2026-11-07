@@ -277,6 +277,7 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     options.bus_sum_saturates = true;
     options.reuse_coefficient = true;
     options.late_saturation_mode = true;
+    options.xread_flush = true;
 
     e.m = new master::Master();
     e.s = new slave::Slave();
@@ -287,7 +288,10 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     e.m->reset();
     e.s->reset();
     e.m->lean = e.s->lean = true;
-    for (auto& h : e.host) h.dsp = new tms::Core(options);
+    // DASP4 has 3 x 44C256 DRAM, 256K x 12 bits: 128K words of 24 bits in two accesses.
+    tms::Options options4 = options;
+    options4.xmem_words = 0x20000;
+    for (int n = 0; n < 5; n++) e.host[n].dsp = new tms::Core(n == 4 ? options4 : options);
     e.s->on_dsp_byte = [&e](u8 selected, u8 data) {
         for (int chip = 0; chip < 5; chip++) if (selected & (1 << chip)) e.held[e.filling][chip][e.half].push_back({data, false});
     };
