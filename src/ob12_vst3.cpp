@@ -335,7 +335,7 @@ public:
         Instrument* inst = instrument.get();
         if (inst && inst->engine) {
             // Notes, pressure and controller changes go to the Master's MIDI input in sample order.
-            struct Message { int32 offset; int order; uint8_t bytes[3]; int count; };
+            struct Message { int32 offset; int order; uint8_t bytes[3]; int count; std::vector<uint8_t> raw; };
             std::vector<Message> list;
             int order = 0;
             if (data.inputEvents) {
@@ -354,6 +354,10 @@ public:
                     } else if (e.type == Event::kPolyPressureEvent) {
                         m.bytes[0] = 0xA0; m.bytes[1] = (uint8_t)std::clamp<int>(e.polyPressure.pitch, 0, 127);
                         m.bytes[2] = (uint8_t)std::clamp<int>((int)std::lround(e.polyPressure.pressure * 127), 0, 127);
+                    } else if (e.type == Event::kDataEvent && e.data.bytes && e.data.size) {
+                        // Some hosts (VSTHost) send controllers, bend and pressure as raw MIDI here, not
+                        // through IMidiMapping; the Master reads them as the unit's MIDI input would.
+                        m.raw.assign(e.data.bytes, e.data.bytes + std::min<uint32>(e.data.size, 4096));
                     } else continue;
                     list.push_back(m);
                 }
@@ -383,13 +387,16 @@ public:
                 }
             }
             std::stable_sort(list.begin(), list.end(), [](const Message& a, const Message& b) { return a.offset < b.offset; });
-            for (auto& m : list) inst->engine->midi(m.bytes, m.count);
+            for (auto& m : list) {
+                if (!m.raw.empty()) inst->engine->midi(m.raw.data(), (int)m.raw.size());
+                else inst->engine->midi(m.bytes, m.count);
+            }
             if (FILE* f = midi_log()) {
-                for (auto& m : list) fprintf(f, "midi %02X %02X %02X\n", m.bytes[0], m.bytes[1], m.count > 2 ? m.bytes[2] : 0);
-                if (data.inputEvents) for (int32 i = 0; i < data.inputEvents->getEventCount(); i++) {
-                    Event e{};
-                    if (data.inputEvents->getEvent(i, e) == kResultOk && e.type != Event::kNoteOnEvent && e.type != Event::kNoteOffEvent)
-                        fprintf(f, "event type %d\n", e.type);
+                for (auto& m : list) {
+                    if (m.raw.empty()) { fprintf(f, "midi %02X %02X %02X\n", m.bytes[0], m.bytes[1], m.count > 2 ? m.bytes[2] : 0); continue; }
+                    fprintf(f, "data");
+                    for (size_t j = 0; j < m.raw.size() && j < 16; j++) fprintf(f, " %02X", m.raw[j]);
+                    fprintf(f, m.raw.size() > 16 ? " ... (%zu)\n" : "\n", m.raw.size());
                 }
                 if (!list.empty()) fflush(f);
             }
