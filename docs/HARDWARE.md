@@ -1814,3 +1814,33 @@ Not mapped yet: the other lamps (Osc wave select, Sync, Mono, Portamento and oth
 clear bit in one press each), the small indicator LEDs (LP/BP/HP, routing, LFO waves, octave,
 arpeggio mode and range, and so on), and the two blinking bits. The 48 circles of 12 x 12 in the
 art are the key lamps; the indicators are smaller circles, not yet listed.
+
+### LED schematic, Panel A (read from the service manual, p36 "OB12 Panel A: Leds", p35 buttons)
+
+Page index of the PDF (no text layer, read as images): p2-17 main board (p3 Master CPU, p5 peripherals
+interface), p18-32 the same again, p33 Panel A connector, p34-36 Panel A, p37 Panel B connector,
+p38-40 Panel B, p41 Panel C connector, p43-48 PCB layouts.
+
+Panel A LEDs: six 74HC595 (IC6, IC7, IC2, IC9, IC8, IC4), SCK = LEDCK and SI = LEDD shared, each RCK
+its own LED[n], n = 1..6. That is the port 8 shift (bit 6 clock, bit 5 data) and the strobe at
+68FF80+n: latch n is LED[n]. The first bit shifted ends on Q7, so Q(k) is bit (7-k) of the byte the
+firmware sends; `led[n]` holds that byte.
+
+| RCK | IC | outputs | group on the sheet |
+|---|---|---|---|
+| LED[1] | IC6 | ONT0-7 | LFO2: DL17, DL18, DL24, DL29, DL19, DL20, DL25, DL30 |
+| LED[2] | IC7 | ON8-15 | KEYBOARD: DL13, DL23, DL31, DL36, DL37, DL38, DL32, DL39 |
+| LED[3] | IC2 | ONT16-23 | WAVE SELECT, ENV DEPT, KEYBOARD: DL21, DL22, DL1-DL6 |
+| LED[4] | IC9 | ON24-31 | ARPEGGIO, PHRASE: DL27, DL28, DL45, DL46, DL47, DL33, DL34, DL35 |
+| LED[5] | IC8 | ON32-39 | EFFECTS, ARPEGGIO, PHRASE: DL40-42, DL14, DL43, DL15, DL26, DL44 |
+| LED[6] | IC4 | ON40-46 | OSC1, PHRASE: DL10-12, DL16, DL7-DL9 |
+
+The Q to ON order differs per chip (IC7: Q0 ON8, Q1 ONT10, Q2 ONT12, ... Q6 ON9), to be read per
+output. Which DL sits where on the panel is on the PCB layouts, not yet read. Panel B (p38-40) and C
+(p41) not yet read.
+
+Panel A buttons (p35), bar BUTB[1]: BUT0 LFO1/LFO2/EG (PWM source), BUT1-3 Osc1 Wave Select, BUT4
+Osc Common, BUT5 Effects Level/Param, BUT6 Keyboard Mono, BUT7 LFO1 Wave Select. BUTB[2]: Phrase
+On/Off, Arpeggio Hold, Portamento, Legato, Unison, Phrase Rec. BUTB[3]: LFO2 Depth Select, Keyboard
+OCT-, OSC Shift, OCT+, LFO2 Wave Select. BUTB[4]: Arpeggio Mode, Arpeggio On/Off, Reverb, Delay,
+Overdrive, Chorus, Arpeggio Range. Tap tempos on BTIME[0], BTIME[1].
