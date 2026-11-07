@@ -99,7 +99,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "A-014 The Raver click: glide start offset A2AE92 (one octave) sent to C03A by FC2BAF-FC2C2B, lives 0.6 ms (29 samples) before the rate FF3412; find how long it lives on the unit and the stage equations",
+    "A-014 The Raver click: glide offset lost because C03A (rate) lands one sample before C03B (pole); check Slave instruction timing vs the unit, or DSP host write take-in point",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
     "Display font: large program name is Handel Gothic (E:/dl/handelgotdlig-regular.zip, Thor); small font nearly right",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",

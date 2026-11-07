@@ -1974,3 +1974,22 @@ the state would be -0.72 and fine; in the model it stays 0.6 ms, about 29 sample
 it to itself each sample into the rail. Open: how long the offset lives in C03A on the unit (the
 Slave's time to the next write, the DSP host interface latency), and the stage's exact equations.
 Not fixed.
+
+### The Raver: the glide start offset is lost by one sample (measured)
+
+Stage equations, from the per-sample cells (the 6C words negate): D1F = C03A + 0.9917 x D1F (the
+glide; with C03B = 0 it copies C03A, which is how the start is loaded) and D20 = C03C + 0.442 x D20,
+whose steady value is exactly 1.0, so D20 at the rail is by design.
+
+Sample by sample at the legato change:
+- 19.0163: C03A = -0.729, C03B still 0, so D1F = -0.729: the start offset loads.
+- 19.01688: C03A = -0.006 (the rate constant) while C03B is still 0 for one sample: D1F = -0.006.
+  The offset is lost.
+- 19.01690: C03B = -0.992 arrives; the glide runs smoothly from -0.006 instead of -0.729.
+
+So the click is the step -0.729 to -0.006 in one sample, and the glide runs from the wrong start:
+Thor's unnatural slide. The firmware writes C03A and C03B back to back, so it means them to take
+effect together. In the model they land one sample apart. Candidates: the f2mc16 core's instruction
+cycle counts (MAME tables, approximations) make the Slave slower than the unit, or the DSP host
+interface takes writes in at another point. The earlier 29-sample theory is retracted: with C03B 0
+the stage copies C03A and does not accumulate it. Not fixed.
