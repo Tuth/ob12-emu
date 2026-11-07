@@ -200,7 +200,8 @@ public:
         if (address == 0x68ff00) { lcd.write_data(data); return; }
         if (address == 0x68ff01) { lcd.command(data); return; }
         if ((address & 0xfffff0) == 0x68ff80) led[address & 15] = led_shift;  // CS2 strobe: latch n takes the shifted byte
-        if ((address & 0xfffff0) == 0x68ff80 && led_log) fprintf(led_log, "%.4f %06X %02X %06X\n", cycles_total / 16e6, address, led_shift, pc);  // study: OB12_LED_LOG
+        if ((address & 0xfffff0) == 0x68ff80 && led_log) fprintf(led_log, "%.4f %06X %02X %06X img %02X blink %02X phase %02X\n", cycles_total / 16e6, address, led_shift, pc,
+            ram[(0xec5b09 + (address & 15)) & 0x3ffff], ram[(0xec5afc + (address & 15)) & 0x3ffff], ram[0xec5b30 & 0x3ffff]);  // study: OB12_LED_LOG, with the firmware's two LED images
         Stat& s = touch(ext, address & 0xfffff0);
         s.writes++;
         s.last = data;

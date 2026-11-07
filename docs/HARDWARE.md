@@ -2047,3 +2047,13 @@ the column table. Build:
 (the TTF lives in rom/fonts, outside git like the ROMs). Copy font_sector.bin into each bundle's rom.
 
 Audio reference unchanged, 12b99e29. Stroke weight against the photo not compared closely.
+
+### Lamps that stay dark: the firmware's own image lacks them (measured)
+
+Thor: Mono, Legato, Portamento, Unison and others never light. The Master builds each latch byte
+from RAM: EC5B09 + latch normally, EC5AFC + latch when EC5B30 is non zero (F0F1A6). The LED log now
+prints both images and the flag at each strobe. Pressing Mono, Legato, Portamento, Unison
+(`OB12_KEYS` bars 1 and 2): the Master sends the MIDI change (Mono: B0 7E 01), rewrites latches 2 and
+3, but both images stay 44 and 14, equal to the bytes shifted out, and EC5B30 stays 00. So the shift
+model is right and the firmware does not set these lamps. Open: which Master routine sets the lamp
+image after a key press, and why it does not run or does not see the change here.
