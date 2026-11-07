@@ -62,3 +62,16 @@ Used at 0DD, 154, 1BF in the voice programs and at 0E8, 166 in the program for t
 use has a secondary on the C bus and directly follows a multiply by CMEM, so this reads as the form
 of 42 for when the C bus is taken. The multiplier keeps the last C word. Replaces an earlier version
 of this finding, low MAC word times DMEM, which silenced the right channel once effects ran.
+
+## Draft, not sent: new Result section for the PR description
+
+## Result with all four
+
+With these, the items under "Not in this PR", and the harness's own parts, saturating bus sums and
+the Slave's timers among them, the instrument plays from unmodified firmware with its effects
+running, in stereo. Measured at the main output, program A-001:
+- Notes C3 and C4 sit an octave apart, strongest lines 130.8 Hz and 261.6 Hz, each with detuned
+  neighbours, 130.0 and 132.4 Hz, 260.4 and 265.2 Hz. Spectral flatness 0.017 and 0.006.
+- A three note chord shows its three pitches, 130.8, 164.8 and 195.2 Hz.
+- Left and right differ: RMS 234275 and 129655 for C3.
+- Idle output is exactly 0.
