@@ -20,7 +20,7 @@
 //   OB12_FORCE_GAIN=1  old diagnostic, not needed: forces DASP4 cells C00D, C00F, C0CB
 //   OB12_SLAVE_SEQ=t,step,status,value  send status n value to the Slave for n = 0..127, hex
 //   OB12_SLAVE_FILE=f  lines of seconds and hex bytes, sent straight to the Slave
-//   OB12_AUX_TONE=1  put a test tone on the even bus slot into DASP4 from the note time
+//   OB12_AUX_TONE=1 or amplitude  put a 440 Hz tone (default amplitude 1000000) on the even bus slot into DASP4 from the note time
 //   OB12_AOUT_CELLS=l,r  study: force the AOUT pointers C07F, C080, hex
 //   OB12_SLAVE_TICK=n  Slave PPG tick every n half frames, default 96 = 1 ms, 0 turns it off
 //   OB12_KEYS=from:to:row:mask,...  hold panel keys, row and mask hex, active low
@@ -329,6 +329,7 @@ int main(int argc, char** argv) {
         }
     }
     bool aux_tone = getenv("OB12_AUX_TONE") != nullptr;
+    double aux_amp = aux_tone && atof(getenv("OB12_AUX_TONE")) > 1 ? atof(getenv("OB12_AUX_TONE")) : 1000000;  // OB12_AUX_TONE=amplitude, default 1000000
     int aout_left = -1, aout_right = -1;  // study: point AOUT at other DMEM cells
     if (const char* text = getenv("OB12_AOUT_CELLS")) sscanf(text, "%x,%x", &aout_left, &aout_right);
     // Study: OB12_SLAVE_WIN=from,to,from,to writes Slave PCs and RAM accesses to build/slave_N.txt.
@@ -607,8 +608,9 @@ int main(int argc, char** argv) {
                 }
             }
             // Study: a 440 Hz tone on the empty bus slot, into DASP4 only.
-            if (aux_tone && (k & 1) == 0 && now >= note_at) for (int c = 0; c < 2; c++)
-                host[4].dsp->ar[0][c] = (int32_t)(1000000 * sin(now * 440 * 6.283185307));
+            // OB12_BUS_TONE=1 puts it on the odd slot instead, where the voices arrive.
+            if (aux_tone && (k & 1) == (getenv("OB12_BUS_TONE") ? 1 : 0) && now >= note_at) for (int c = 0; c < 2; c++)
+                host[4].dsp->ar[0][c] = (int32_t)(aux_amp * sin(now * 440 * 6.283185307));
             for (auto& f : force_cells) host[4].dsp->cmem[f.first] = f.second;
             if (aout_left >= 0) { host[4].dsp->cmem[0x7f] = aout_left; host[4].dsp->cmem[0x80] = aout_right; }
             // Diagnostic only: DASP4 output gains the firmware has not been seen to write.

@@ -1674,3 +1674,30 @@ effect buffers overwrote each other.
 Not checked on silicon: the 128K is from the board's parts, the pipeline from the firmware's use.
 Echo times against the TIME parameter are not measured yet. Superseded: "the old options only hide
 the ring" stands; `OB12_MACLO` and `OB12_EARLY_POINTER` are not the fix.
+
+## Output level and resonance (measured)
+
+Thor: most programs sit at -30 to -17 dB in the host, and maximum Resonance on A-001 gets very loud
+and clips when a new note comes. The plugin output is MOUT / 2^23, so 1:1 with the DSP word.
+
+Tone on the voice bus into DASP4 (`OB12_AUX_TONE=amplitude OB12_BUS_TONE=1`, the odd slot where
+voices arrive; the even slot is the AUX input and stays silent): -20 dBFS peak in gives MOUT -10.3
+dBFS peak, -17.1 rms, so DASP4 adds about 6 to 10 dB. Full scale in clips. Master Volume at the
+plugin's rest position 80 gives the same as FF.
+
+A-001, note 3C, then 40 and 43 (`OB12_MIDI_EVENTS`, `OB12_CHIP_LOG`):
+
+| | Voice bus, DASP3 AX2 L | MOUT L |
+|---|---|---|
+| Resonance 80, one note | -24.7 dBFS peak, -34.5 rms | -19.3 peak, -28.3 rms |
+| Resonance 80, three notes | -21.8 / -33.0 | -17.0 / -26.6 |
+| Resonance FF, one note | -9.0 / -13.0 | 0.0 / -7.1 |
+| Resonance FF, three notes | -2.9 / -8.6 | 0.0 / -1.4 |
+| Resonance FF, Master Volume 40 | -0.1 / -7.4 | -18.6 / -19.8 |
+| Resonance FF, Master Volume 20 | -2.8 / -8.4 | -25.4 / -26.4 |
+
+- Maximum resonance raises the voice bus by 21 dB; the bus itself does not clip.
+- The clip is inside DASP4, before Master Volume: with the volume down the peak stays within
+  about 1 dB of the rms, a clipped wave made quieter.
+- Whether the real unit does the same is not known. A makeup gain at the output would raise
+  normal programs and not touch this clip.
