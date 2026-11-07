@@ -116,9 +116,14 @@ struct Engine::Impl {
     master::Master* m = nullptr;
     slave::Slave* s = nullptr;
     Host host[5];
-    std::vector<std::pair<u8, u8>> held;
+    // Chips read each other two half frames late, so two half frames can run per gate. Host bytes
+    // stay per chip and per half, so each lands between the same two half frames as on one thread.
+    struct Byte { u8 data; bool deselect; };
+    std::vector<Byte> held[2][5][2];  // batch parity, chip, half
+    int32_t snap[2][2][5][3][2] = {};  // batch parity, half, chip, port, channel: ports after that run
+    int filling = 0, half = 0;         // where the CPUs put bytes now
+    long batch = 0;
     size_t m_sent = 0, s_sent = 0;
-    int32_t wire[4][5][3][2] = {};
     long k = 0;
     Gate cpu_gate, dsp_gate;
     std::atomic<bool> stop{false};
@@ -173,15 +178,7 @@ struct Engine::Impl {
         }
     }
 
-    void post(long frame_k) {
-        if (!(frame_k & 1)) return;
-        auto* d = host[4].dsp;
-        out[made * 2] = d->ax[1][0];
-        out[made * 2 + 1] = d->ax[1][1];
-        made++;
-    }
-
-    void half_frame() {
+    void cpu_slice() {
         double now = k / 96000.0;
         m->pot_clock = now;
         encoder_step();
@@ -203,47 +200,60 @@ struct Engine::Impl {
             cpu_gate.wait();
         }
         if (!error.empty()) throw std::runtime_error(error);
-        if (k > 0) {
-            dsp_gate.wait();
-            post(k - 1);
-        }
-        for (auto& b : held) {
-            if (b.first == 0x80) { for (auto& h : host) h.deselect(); }
-            else for (int chip = 0; chip < 5; chip++) if (b.first & (1 << chip)) host[chip].byte(b.second);
-        }
-        held.clear();
         auto& mu = m->link();
         auto& su = s->link();
         for (; m_sent < mu.head.size(); m_sent++) su.rx_queue.push_back(mu.head[m_sent]);
         for (; s_sent < su.head.size(); s_sent++) mu.rx_queue.push_back(su.head[s_sent]);
         if (s_sent >= 18) ready.store(true, std::memory_order_relaxed);
-
-        // A word sent in one slot arrives two slots later, see "Two-slot audio bus".
-        int32_t ax2[5][2], ax3[5][2];
-        for (int n = 0; n < 5; n++) for (int c = 0; c < 2; c++) {
-            ax2[n][c] = host[n].dsp->ax[1][c];
-            ax3[n][c] = host[n].dsp->ax[2][c];
-        }
-        int slot = k % 4, from = (k + 3) % 4;
-        for (int n = 0; n < 5; n++) for (int c = 0; c < 2; c++) {
-            wire[slot][n][0][c] = host[n].dsp->ax[0][c];
-            wire[slot][n][1][c] = ax2[n][c];
-            wire[slot][n][2][c] = ax3[n][c];
-        }
-        for (int c = 0; c < 2; c++) {
-            host[0].dsp->ar[0][c] = wire[from][4][0][c];
-            host[0].dsp->ar[1][c] = 0;
-            for (int n = 1; n < 5; n++) {
-                host[n].dsp->ar[0][c] = wire[from][n - 1][1][c];
-                host[n].dsp->ar[1][c] = wire[from][n - 1][2][c];
-            }
-        }
-        for (int n = 0; n < 5; n++) {
-            Host& h = host[n];
-            if (h.start_pending && (k & 1) == 0) { h.start_pending = false; h.running = true; }
-        }
-        dsp_gate.open(5);
         k++;
+    }
+
+    // One chip through both half frames of a batch, on its own worker.
+    void chip_batch(int n) {
+        long b = dsp_batch;
+        int now = b & 1, before = now ^ 1;
+        Host& h = host[n];
+        tms::Core* d = h.dsp;
+        for (int part = 0; part < 2; part++) {
+            auto& list = held[now][n][part];
+            for (auto& byte : list) {
+                if (byte.deselect) h.deselect(); else h.byte(byte.data);
+            }
+            list.clear();
+            // A word sent in one slot arrives two slots later, see "Two-slot audio bus".
+            for (int c = 0; c < 2; c++) {
+                if (n == 0) {
+                    d->ar[0][c] = snap[before][part][4][0][c];
+                    d->ar[1][c] = 0;
+                } else {
+                    d->ar[0][c] = snap[before][part][n - 1][1][c];
+                    d->ar[1][c] = snap[before][part][n - 1][2][c];
+                }
+            }
+            if (h.start_pending && part == 0) { h.start_pending = false; h.running = true; }
+            if (h.running) for (int i = 0; i < 256; i++) d->step();
+            memcpy(snap[now][part][n], d->ax, sizeof d->ax);
+        }
+    }
+
+    long dsp_batch = 0;
+
+    void next_batch() {
+        filling = batch & 1;
+        half = 0;
+        cpu_slice();
+        half = 1;
+        cpu_slice();
+        if (batch > 0) {
+            dsp_gate.wait();
+            const int32_t* frame = snap[(batch - 1) & 1][1][4][1];  // MOUT after the odd half frame
+            out[made * 2] = frame[0];
+            out[made * 2 + 1] = frame[1];
+            made++;
+        }
+        dsp_batch = batch;
+        dsp_gate.open(5);
+        batch++;
     }
 };
 
@@ -272,8 +282,12 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     e.s->reset();
     e.m->lean = e.s->lean = true;
     for (auto& h : e.host) h.dsp = new tms::Core(options);
-    e.s->on_dsp_byte = [&e](u8 selected, u8 data) { e.held.push_back({selected, data}); };
-    e.s->on_dsp_select = [&e]() { e.held.push_back({0x80, 0}); };
+    e.s->on_dsp_byte = [&e](u8 selected, u8 data) {
+        for (int chip = 0; chip < 5; chip++) if (selected & (1 << chip)) e.held[e.filling][chip][e.half].push_back({data, false});
+    };
+    e.s->on_dsp_select = [&e]() {
+        for (int chip = 0; chip < 5; chip++) e.held[e.filling][chip][e.half].push_back({0, true});
+    };
 
     e.workers.emplace_back([&e]() {
         long seen = 0;
@@ -292,7 +306,7 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
             wait_for(e.dsp_gate, seen, e.stop);
             if (e.stop) return;
             seen++;
-            if (e.host[n].running) for (int i = 0; i < 256; i++) e.host[n].dsp->step();
+            e.chip_batch(n);
             e.dsp_gate.done();
         }
     });
@@ -311,7 +325,7 @@ void Engine::run(int32_t* frames, int n) {
     Impl& e = *impl;
     e.out = frames;
     e.made = 0;
-    while (e.made < n) e.half_frame();
+    while (e.made < n) e.next_batch();
 }
 
 void Engine::midi(const uint8_t* bytes, int count) {

@@ -1245,3 +1245,19 @@ cores change, and `build_master.bat` overwrites the two objects, so it comes aft
 Next, not done: two half frames per gate. Chips read each other two half frames late, so a
 batch of two is legal, if host bytes are applied between the two halves to keep the output
 identical. Then fewer threads, or a faster step().
+
+## Two half frames per gate (measured)
+
+Chips read each other two half frames late, so the engine now runs two half frames per DSP gate.
+Each chip keeps host bytes per half and takes its inputs from the previous batch's port
+snapshots, so bytes land between the same two half frames as on one thread.
+
+- Output identical, MD5 17c551a0a8e1d2eeef7d49160f9b9c1a. Offline speed 2.21 x, from 1.96 x.
+- Load at real time did not fall: 4.40-4.97 cores in three runs, 0 ring empties, also with one CPU
+  thread, which is now safer but still off by default.
+
+Why not: at 2.21 x a chip takes about 18 ns a step. 24.6M steps a second per chip is about 0.45 of
+a core, so five chips are about 2.2 cores of real work, by arithmetic, not measured, and the two
+CPUs come on top. So the floor is near 3 cores and about 1.5 cores are left to win in waiting.
+Lowering the floor needs a faster step(). An idle instance is not measured: the machine runs
+all the time, as a real one does.
