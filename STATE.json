@@ -74,7 +74,8 @@
       "First DAW-free play by Thor through the plugin: presets sound sensible. Own core 15-20% faster than public on the main programs",
       "Font format found; replacement sector built; firmware screens readable in the panel",
       "CPU load 6.56 to about 4.4 cores at real time; offline 1.96 x with profile guidance; output identical",
-      "Two half frames per gate: 2.21 x offline, output identical; load about 4.5 cores, floor near 3"
+      "Two half frames per gate: 2.21 x offline, output identical; load about 4.5 cores, floor near 3",
+      "Bus wrap from Thor recording: six voice output adds saturate; 0 flips, 3 note run identical"
     ],
     "blocked": []
   },
@@ -88,6 +89,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "Find the real AOVM mechanism at the bus adds; check voice level, a single note peaks at 3.3M of 8.4M",
     "CPU: faster step() is what lowers the floor",
     "Font polish: selected rows, real font sizes per number, glyphs above 7F, or a real flash dump",
     "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",

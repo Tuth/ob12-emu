@@ -1261,3 +1261,36 @@ a core, so five chips are about 2.2 cores of real work, by arithmetic, not measu
 CPUs come on top. So the floor is near 3 cores and about 1.5 cores are left to win in waiting.
 Lowering the floor needs a faster step(). An idle instance is not measured: the machine runs
 all the time, as a real one does.
+
+## Bus sum saturates (found from Thor's recording, inferred, not checked on silicon)
+
+Thor's recording, first preset, 6-7 notes held, resonance up, filter moved: at 96 kHz, every level
+flat at +-0.1076, and single sample flips from one rail to the other, 10396 large steps. The
+flat tops are expected clipping. The flips are not.
+
+Reproduced: notes 30, 37, 3C, 40, 43, 48, 4C, Resonance pot FF, Frequency pot swept: MOUT left 1902
+flips from 15 s on. The same flips sit on the voice bus. Plain 12 notes with no pot moved also
+give 159. A chip log showed the cause: DASP1 output 8229948 then -8154229 while DASP0 stays
+near full scale, so the running sum across chips overflowed and wrapped.
+
+Why it wraps: each voice adds its output to the bus word with an ACC add, and AOVM, ACC
+saturation, is off there. Counting wraps per word showed 21 and A1 adds on the bus: A13B2122,
+2186A136, A13B2139, 2186A14D, 210921E2, 21A6B000. Other words wrap hundreds of thousands of
+times a second and are meant to: 3C41127F and the like are the oscillators.
+
+Why I call this an emulation fault, though my decoding of secondary 2D follows the public
+emulator: a plain 12 note pad should not throw rail to rail spikes on a released instrument, and the
+words 6C2D1AA1, 6C2D1AA7 clear AOVM right after these adds, which is pointless if it was already
+off. So AOVM may really be on here, through something not understood. Treating 116Dxxxx
+as not clearing AOVM removed the flips too, but changed normal sound slightly, up to 2043 of
+32768, so it reaches further than the bus. That was dropped.
+
+Option `bus_sum_saturates`: those six words add with saturation. `OB12_BUS_WRAP=1` turns it off.
+
+Measured: 0 flips in both tests on MOUT and bus. The 3 note run is bit identical to before, MD5
+17c551a0a8e1d2eeef7d49160f9b9c1a, as nothing overflows there.
+
+Open: the real mechanism. The word list is OB-12 specific and not a chip rule, so it does not
+belong in the upstream PR. Hard clipping stays: 12 notes put MOUT left at the rail for 34% of the
+time at start-up Master Volume, which may mean voices are hotter here than on a real unit. A single
+note peaks near 3.3M of 8.4M.

@@ -26,6 +26,7 @@ struct Options {
     bool maclo_unsigned = false;     // primary 43 takes the low MAC word as unsigned
     bool maclo_shift = false;        // primary 43 product sits 24 bits lower, for double precision
     bool compare_3e = false;         // primary 3E flag 8 compares DMEM with CMEM, flags only
+    bool bus_sum_saturates = false;  // the OB-12 voice output adds clip instead of wrapping
 };
 
 class Core {
@@ -63,6 +64,7 @@ public:
 
     // Encodings the core does not implement, for measurement.
     std::map<uint32_t, long> unknown;
+    long wraps[512] = {};  // ACC overflows without saturation, by word
 
 private:
     bool flag(int reg, int bit) const { return (cr[reg] >> bit) & 1; }

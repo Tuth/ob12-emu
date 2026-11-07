@@ -132,6 +132,7 @@ int32_t Core::settle_acc(int64_t value) {
         else if (value > 0x7fffff) { value = 0x7fffff; set_flag(CR1, AOV, true); }
     } else if (value < -0x800000 || value > 0x7fffff) {
         set_flag(CR1, AOV, true);
+        wraps[(pc - 1) & 0x1ff]++;
     }
     int32_t result = s24((uint32_t)value);
     set_flag(CR1, ACCZ, result == 0);
@@ -654,6 +655,10 @@ void Core::post_increment(uint32_t word) {
 
 void Core::step() {
     uint32_t word = pmem[pc];
+    // The voice output adds of the OB-12 programs, see "Bus sum saturates" in docs/HARDWARE.md.
+    bool bus_sum = options.bus_sum_saturates && (word == 0xa13b2122 || word == 0xa13b2139 || word == 0x2186a136 || word == 0x2186a14d || word == 0x210921e2 || word == 0x21a6b000);
+    bool plain = flag(CR1, AOVM);
+    if (bus_sum) set_flag(CR1, AOVM, true);
     if (rptc && pc == rep_end) { pc = rep_start; rptc--; }
     else pc = (pc + 1) & 0x1ff;
 
@@ -680,6 +685,8 @@ void Core::step() {
         }
         post_increment(word);
     }
+
+    if (bus_sum) set_flag(CR1, AOVM, plain);
 
     for (int unit = 0; unit < 2; unit++) {
         mac_d2[unit] = mac_d1[unit];

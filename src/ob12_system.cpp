@@ -176,6 +176,7 @@ int main(int argc, char** argv) {
     options.noise_generator = getenv("OB12_NO_NOISE") == nullptr;
     options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
     options.compare_3e = getenv("OB12_NO_3E") == nullptr;
+    options.bus_sum_saturates = getenv("OB12_BUS_WRAP") == nullptr;
     options.maclo_shift = getenv("OB12_MACLO_NO_SHIFT") == nullptr;
     options.maclo_unsigned = getenv("OB12_MACLO_SIGNED") == nullptr;
     options.queued_pointer_load = getenv("OB12_EARLY_POINTER") == nullptr;
@@ -211,6 +212,7 @@ int main(int argc, char** argv) {
     double clock = 0;
     FILE* host_log = getenv("OB12_HOST_LOG") ? fopen(getenv("OB12_HOST_LOG"), "w") : nullptr;
     FILE* port_log = getenv("OB12_PORT_LOG") ? fopen("build/ports.raw", "wb") : nullptr;
+    FILE* chip_log = getenv("OB12_CHIP_LOG") ? fopen("build/chips.raw", "wb") : nullptr;
     FILE* cell_probe = getenv("OB12_PORT_LOG") && getenv("OB12_AUX_TONE") ? fopen("build/cells4.raw", "wb") : nullptr;
     m->text_log = host_log;
     for (int n = 0; n < 5; n++) { host[n].log = host_log; host[n].chip = n; host[n].clock = &clock; }
@@ -421,6 +423,7 @@ int main(int argc, char** argv) {
                 int32_t v[6];
                 for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) v[p * 2 + c] = host[4].dsp->ax[p][c];
                 fwrite(v, 4, 6, port_log);
+                if (chip_log) { int32_t c[5]; for (int n = 0; n < 5; n++) c[n] = host[n].dsp->ax[1][0]; fwrite(c, 4, 5, chip_log); }
                 if (cell_probe) { int32_t c[6]; int list[6] = {0x0b, 0x0f, 0xd0, 0xd1, 0x08, 0x17}; for (int i = 0; i < 6; i++) c[i] = logical_d(host[4].dsp, list[i]); fwrite(c, 4, 6, cell_probe); }
             }
             if (!live_on) {
@@ -691,6 +694,7 @@ int main(int argc, char** argv) {
     printf("slave vectors:"); for (auto& entry : s->vectors) printf(" %02X x%ld", entry.first, entry.second); printf(" ENIR %02X EIRR %02X ELVR %02X %02X TBTC %02X", s->io[0x28], s->io[0x29], s->io[0x2a], s->io[0x2b], s->io[0xa9]); puts("");
     for (auto& entry : m->iostat) if (entry.first < 0x12 || (entry.first >= 0x28 && entry.first < 0x30)) printf("master io %02X r%ld w%ld last %02X pc %06X\n", entry.first, entry.second.reads, entry.second.writes, entry.second.last, entry.second.first_pc);
     printf("font ids:"); for (int i = 0; i < 64; i++) if (m->font_reads[i]) printf(" %d x%ld", i, m->font_reads[i]); puts("");
+    for (int n = 0; n < 5; n++) { printf("wraps DASP%d:", n); for (int i = 0; i < 512; i++) if (host[n].dsp->wraps[i]) printf(" %03X %08X x%ld", i, host[n].dsp->pmem[i], host[n].dsp->wraps[i]); puts(""); }
     printf("key reads:"); for (long r : m->key_reads) printf(" %ld", r); puts("");
     m->lcd.save_pbm("build/lcd.pbm");
     m->save_hot("build/hot.txt");
