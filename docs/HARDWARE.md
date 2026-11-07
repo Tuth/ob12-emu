@@ -1587,3 +1587,34 @@ Open: if the firmware means 1.0, the real loop holds a gain below 1 somewhere we
 not in the loop on the real chip. Candidates: what the 43 at 166 really multiplies by, the queued
 pointer load (secondaries 06, 08 sit on both 43s and the early pointer load also ends the ring).
 Not decided, nothing changed.
+
+### Canada, continued: it is the delay, and its loop runs through LEVEL (measured)
+
+- Panel keys (`seq_test` t:key): Chorus On off after note off stops the ring at once; Delay On and
+  Reverb On do not. The chorus key also drives the effect chain order, so this alone did not name
+  the effect.
+- Sensitivity sweep, each of 116 DASP4 multiply coefficients halved after note off
+  (`OB12_CREADS` lists them, `OB12_POKE` halves them): only C0F2, C0FA, C12C end the ring. Output
+  gains settle near 0.59. Run serial (`OB12_SERIAL=1`) when many runs go in parallel: six threaded
+  runs at once took 39 minutes for 12 runs, spinning workers fight for the cores.
+- The Slave sets them from the effects block `F0 7E 04` plus `F0 7F 30 04 04 04 7F` (`OB12_SLAVE_SYSEX`
+  injects bytes into A-001). One byte at a time, matched to the display (EDIT DELAY):
+
+| Byte | A-001 | A-004 | Display | DASP4 |
+|---|---|---|---|---|
+| 30 | 66 | 7F | Delay LEVEL 80 / 100 | C12C 3D6FD0 / 7FFFFF |
+| 31 | 7F | 33 | TIME 100 / 40 | C12D, C12E, C12F |
+| 32 | 4C | 59 | FEEDBACK +25 / +50 | C0F4, C0F8 = 400000 at +50 |
+| 33 | 07 | 00 | HI-DAMP 11K5 / OFF | C0F5/C0F6, C0F9/C0FA (pairs summing to 7FFFFF) |
+| 24-28 | | | Chorus LEVEL, RATE, DEPTH, FEEDBACK, PRE-DELAY | |
+
+  Bytes scale display values by 1.27; FEEDBACK is centred on 40.
+- So the loop holds LEVEL and the right channel damping, at 1.0 each in Canada, and not FEEDBACK.
+  Halving FEEDBACK (C0F4, C0F8) changes nothing, to the last digit, in the current model,
+  `OB12_MACLO` and `OB12_EARLY_POINTER` alike; halving LEVEL changes nothing in the two old models.
+  A delay's repeats should follow FEEDBACK. So the delay line as modelled is wrong, not one
+  coefficient, and the old options only hide the ring.
+- A-001, one short note: the level bumps about every 250 ms, not clearly echoes. Not settled.
+
+Next: follow the delay line through XMEM (the 39 reads and writes, their timing) and the right
+channel words 165-186, and check that repeats follow FEEDBACK and TIME. Nothing changed in the model.

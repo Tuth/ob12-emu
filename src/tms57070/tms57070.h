@@ -68,6 +68,10 @@ public:
     std::map<uint32_t, long> unknown;
     long wraps[512] = {};  // ACC overflows without saturation, by word
 
+    // Study access: the CMEM and DMEM index a word would use now.
+    uint32_t study_cmem(uint32_t word) const { return cmem_operand(word); }
+    uint32_t study_dmem(uint32_t word) const { return dmem_operand(word); }
+
 private:
     bool flag(int reg, int bit) const { return (cr[reg] >> bit) & 1; }
     void set_flag(int reg, int bit, bool on) { cr[reg] = (cr[reg] & ~(1u << bit)) | ((uint32_t)on << bit); }

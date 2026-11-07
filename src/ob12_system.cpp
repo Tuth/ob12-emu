@@ -257,6 +257,18 @@ int main(int argc, char** argv) {
     struct TimedMidi { double at; u8 status, note; };
     std::vector<TimedMidi> midi_events;  // OB12_MIDI_EVENTS=t:on:nn,t:off:nn,...  note hex, into the Master
     size_t next_event = 0;
+    double creads_at = getenv("OB12_CREADS") ? atof(getenv("OB12_CREADS")) : 0;  // study: list DASP4 multiply operands once at t
+    bool creads_done = false;
+    // study: OB12_SLAVE_SYSEX=t:F07E04...F7 sends these hex bytes straight to the Slave at t
+    double slave_sysex_at = -1;
+    std::vector<u8> slave_sysex;
+    if (const char* text = getenv("OB12_SLAVE_SYSEX")) {
+        const char* colon = strchr(text, ':');
+        if (colon) {
+            slave_sysex_at = atof(text);
+            for (const char* p = colon + 1; p[0] && p[1]; p += 2) slave_sysex.push_back((u8)strtol(std::string(p, 2).c_str(), nullptr, 16));
+        }
+    }
     struct Poke { double at; int chip, address; int32_t value; };
     std::vector<Poke> pokes;  // study: OB12_POKE=t:chip:cmem:value,... hex address and value, held from t on
     if (const char* list = getenv("OB12_POKE")) {
@@ -366,7 +378,7 @@ int main(int argc, char** argv) {
     long port_count[2] = {};
     try {
         int slice = 167;  // set per half frame below, 16 MHz
-        bool threaded = !getenv("OB12_SERIAL") && !cell_log && !start_trace && watch_d.empty() && !getenv("OB12_WATCH_C") && !getenv("OB12_SLAVE_WIN");
+        bool threaded = !getenv("OB12_SERIAL") && !cell_log && !start_trace && watch_d.empty() && !getenv("OB12_WATCH_C") && !getenv("OB12_SLAVE_WIN") && !getenv("OB12_CREADS");
         long long chip_tsc[5] = {};
         Gate cpu_gate, dsp_gate;
         std::atomic<bool> stop_workers{false};
@@ -503,6 +515,10 @@ int main(int argc, char** argv) {
                 midi_channel++;
             }
             for (auto& p : pokes) if (now >= p.at) host[p.chip].dsp->cmem[p.address & 0x1ff] = p.value;
+            if (slave_sysex_at >= 0 && now >= slave_sysex_at) {
+                s->link().rx_queue.insert(s->link().rx_queue.end(), slave_sysex.begin(), slave_sysex.end());
+                slave_sysex_at = -1;
+            }
             while (next_event < midi_events.size() && now >= midi_events[next_event].at) {
                 auto& ev = midi_events[next_event++];
                 m->midi_in({ev.status, ev.note, (u8)(ev.status == 0x90 ? 0x64 : 0x40)});
@@ -606,6 +622,12 @@ int main(int argc, char** argv) {
                     watch_log++;
                 }
                 if (h.running) for (int i = 0; i < 256; i++) {
+                    if (creads_at > 0 && n == 4 && now >= creads_at && !creads_done) {  // study: one sample of DASP4 multiplies
+                        uint32_t w = h.dsp->pmem[h.dsp->pc], op = (w >> 24) & 0xff;
+                        if (op >= 0x40 && op <= 0x71 && !(op >= 0x68 && op <= 0x6b))
+                            printf("creads %03X %08X C%03X %06X D%02X %06X\n", h.dsp->pc, w, h.dsp->study_cmem(w), h.dsp->cmem[h.dsp->study_cmem(w)] & 0xffffff, h.dsp->study_dmem(w), h.dsp->dmem[h.dsp->study_dmem(w)] & 0xffffff);
+                        if (h.dsp->pc == 511) creads_done = true;
+                    }
                     int pc = h.dsp->pc;
                     h.dsp->step();
                     if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to && ++cell_count % cell_every == 0) {

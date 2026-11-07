@@ -1,6 +1,7 @@
 // A timed event list through the engine, MOUT to a WAV.
 // usage: seq_test <rom dir> <seconds> <out.wav> event...
 // events: t:on:nn  t:off:nn  (note hex, velocity 64)  t:enc:detents  t:pot:channel:mux:value(hex)
+//         t:key:bar:bit  (panel key down, up 80 ms later)
 #include "ob12_engine.h"
 #include <algorithm>
 #include <cstdio>
@@ -9,7 +10,7 @@
 #include <fstream>
 #include <vector>
 
-struct Event { long frame; int kind, a, b, c; };  // kind 0 on, 1 off, 2 encoder, 3 pot
+struct Event { long frame; int kind, a, b, c; };  // kind 0 on, 1 off, 2 encoder, 3 pot, 4 key down, 5 key up
 
 int main(int argc, char** argv) {
     Engine e(argv[1]);
@@ -22,6 +23,11 @@ int main(int argc, char** argv) {
         if (!strcmp(kind, "off")) ev.kind = 1;
         else if (!strcmp(kind, "enc")) { ev.kind = 2; sscanf(argv[i], "%lf:%7[a-z]:%d", &t, kind, &ev.a); }
         else if (!strcmp(kind, "pot")) { ev.kind = 3; sscanf(argv[i], "%lf:%7[a-z]:%d:%d:%x", &t, kind, &ev.a, &ev.b, &ev.c); }
+        else if (!strcmp(kind, "key")) {
+            ev.kind = 4; sscanf(argv[i], "%lf:%7[a-z]:%d:%d", &t, kind, &ev.a, &ev.b);
+            Event up = ev; up.kind = 5; up.frame += 48000 * 8 / 100;
+            events.push_back(up);
+        }
         events.push_back(ev);
     }
     std::sort(events.begin(), events.end(), [](const Event& x, const Event& y) { return x.frame < y.frame; });
@@ -34,7 +40,8 @@ int main(int argc, char** argv) {
             if (ev.kind == 0) { uint8_t m[3] = {0x90, (uint8_t)ev.a, 0x64}; e.midi(m, 3); }
             else if (ev.kind == 1) { uint8_t m[3] = {0x80, (uint8_t)ev.a, 0x40}; e.midi(m, 3); }
             else if (ev.kind == 2) e.turn(ev.a);
-            else e.set_pot(ev.a, ev.b, ev.c);
+            else if (ev.kind == 3) e.set_pot(ev.a, ev.b, ev.c);
+            else e.key(ev.a, ev.b, ev.kind == 4);
         }
         int n = (int)std::min<long>(240, frames - done);
         e.run(audio.data() + done * 2, n);

@@ -94,7 +94,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "A-004 Canada: DASP4 loop with C12C = 1.0 rings forever; find what holds the real loop below 1 (43 at 166, queued pointer load)",
+    "A-004 Canada: DASP4 delay loop runs through LEVEL (C12C) and HI-DAMP, not FEEDBACK (C0F4/C0F8); model the delay line (XMEM 39 timing, words 165-186)",
     "Encoder: three detents at once step four programs",
     "PR #3: secondary 2D order is a fifth finding, send only with approval",
     "Filter envelope: find its cells and check A, D, S, R like the amp; amp checked, no fault",
@@ -124,5 +124,8 @@
     "Boot: the Slave answers at 11.96 s of sound, first note plays from 12.2 s; real boot time unknown"
   ],
   "next_session_first_question": "Does Thor have access to a real OB-12 for a Slave flash dump and reference audio?",
-  "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware."
+  "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware.",
+  "references": {
+    "ob12_archive": "https://ob12.clearalgo.com/ : operating manual EN/IT (MIDI chart p.125), guide book, hidden functions; no byte-level sysex spec"
+  }
 }
