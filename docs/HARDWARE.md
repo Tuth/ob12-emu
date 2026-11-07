@@ -2019,3 +2019,15 @@ note (3C released, 48 at 19 s) lands on DASP0 and shows the same writes for thre
 clicks, so with three of them nearly every note does. With portamento off these stages do not run.
 That the real unit does not click (as Thor reports for the program's behaviour) points to the chip
 taking a stage's A and B words in together.
+
+### The paired take-in, tried and reverted (measured)
+
+01b8766 held each host word one slot and let A, A+1 land together. In `ob12_system` the glide kept its
+offset and the voice bus jump at 19.0 s fell from 0.091 to 0.029. But the engine (`seq_test`, the
+plugin path) got worse: at the same legato change three single sample spikes up to 21132 against
+8744 before, on MOUT. Reverted in 5c9b153; the reference is 12b99e29 again.
+
+Not understood: why the engine and the harness differ with the slot. Candidates: the engine applies
+a part's held bytes before the slot ages, so the half frame count differs; or a pair other than the
+glide stages now lands together and breaks a sequence the Slave means as two steps. Next time: an
+engine and harness run side by side with the slot, per sample at 19.01-19.03 s, before any fix.
