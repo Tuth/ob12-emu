@@ -357,7 +357,16 @@ public:
                     } else if (e.type == Event::kDataEvent && e.data.bytes && e.data.size) {
                         // Some hosts (VSTHost) send controllers, bend and pressure as raw MIDI here, not
                         // through IMidiMapping; the Master reads them as the unit's MIDI input would.
-                        m.raw.assign(e.data.bytes, e.data.bytes + std::min<uint32>(e.data.size, 4096));
+                        // VSTHost pads every short message to three bytes: a clock tick comes as F8 00 00.
+                        // Passed whole, the two zeros ran on under the running status (after a bend,
+                        // E0 00 00, full bend down) at every tick. Only the message's own length goes on.
+                        uint32 size = std::min<uint32>(e.data.size, 4096);
+                        uint8_t status = e.data.bytes[0];
+                        uint32 length = size;
+                        if (status >= 0xf8 || status == 0xf6) length = 1;
+                        else if (status == 0xf1 || status == 0xf3 || (status >= 0xc0 && status < 0xe0)) length = 2;
+                        else if (status == 0xf2 || (status >= 0x80 && status < 0xc0) || (status >= 0xe0 && status < 0xf0)) length = 3;
+                        m.raw.assign(e.data.bytes, e.data.bytes + std::min(length, size));
                     } else continue;
                     list.push_back(m);
                 }
