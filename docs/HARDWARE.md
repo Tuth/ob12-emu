@@ -1745,3 +1745,6 @@ C12E poked to 7800 -27.9, the level of 7E. So the last step alone is 14 of the 2
 Thor recalls the real unit at Resonance max, min cutoff, near the plain level. If so, the real chip
 holds a lossless section down by some means the emulation lacks, since the firmware does not.
 Not settled; nothing changed.
+
+Decision (Thor, 2026-11-07): Resonance 127 stays firmware-true, damping 0, no limiter. Revisit only
+with a recording of a real unit.

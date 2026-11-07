@@ -95,7 +95,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Max resonance: firmware table FCD910 gives damping 0 at 127 on purpose; if the real unit stays moderate, find what holds a lossless SVF section on the chip",
+    "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",
     "Delay: measure echo time against TIME and repeats against FEEDBACK on more programs",
     "Encoder: three detents at once step four programs",
     "PR #3: secondary 2D order is a fifth finding, send only with approval",
@@ -129,5 +129,8 @@
   "terminology": "12dsp111 is the Slave MB90611A firmware, which embeds the TMS57070 microcode. CPU v1.52 is the separate Master firmware.",
   "references": {
     "ob12_archive": "https://ob12.clearalgo.com/ : operating manual EN/IT (MIDI chart p.125), guide book, hidden functions; no byte-level sysex spec"
-  }
+  },
+  "decisions": [
+    "2026-11-07 Thor: Resonance 127 stays firmware-true (damping 0, self-oscillation), no limiter"
+  ]
 }
