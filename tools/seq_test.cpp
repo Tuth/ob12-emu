@@ -2,6 +2,7 @@
 // usage: seq_test <rom dir> <seconds> <out.wav> event...
 // events: t:on:nn  t:off:nn  (note hex, velocity 64)  t:enc:detents  t:pot:channel:mux:value(hex)
 //         t:key:bar:bit  (panel key down, up 80 ms later)  t:dump  (print time and the LED latches)
+//         t:midi:hexbytes  (any MIDI message, e.g. 2.0:midi:E07F7F pitch bend up)
 #include "ob12_engine.h"
 #include <algorithm>
 #include <cstdio>
@@ -10,7 +11,7 @@
 #include <fstream>
 #include <vector>
 
-struct Event { long frame; int kind, a, b, c; };  // kind 0 on, 1 off, 2 encoder, 3 pot, 4 key down, 5 key up
+struct Event { long frame; int kind, a, b, c; uint8_t bytes[3]; int count; };  // kind 0 on, 1 off, 2 encoder, 3 pot, 4 key down, 5 key up
 
 int main(int argc, char** argv) {
     Engine e(argv[1]);
@@ -24,6 +25,12 @@ int main(int argc, char** argv) {
         else if (!strcmp(kind, "enc")) { ev.kind = 2; sscanf(argv[i], "%lf:%7[a-z]:%d", &t, kind, &ev.a); }
         else if (!strcmp(kind, "pot")) { ev.kind = 3; sscanf(argv[i], "%lf:%7[a-z]:%d:%d:%x", &t, kind, &ev.a, &ev.b, &ev.c); }
         else if (!strcmp(kind, "dump")) ev.kind = 6;
+        else if (!strcmp(kind, "midi")) {
+            ev.kind = 7;
+            const char* hex = strchr(strchr(argv[i], ':') + 1, ':') + 1;
+            ev.count = 0;
+            while (ev.count < 3 && hex[0] && hex[1]) { unsigned v; sscanf(hex, "%2x", &v); ev.bytes[ev.count++] = (uint8_t)v; hex += 2; }
+        }
         else if (!strcmp(kind, "key")) {
             ev.kind = 4; sscanf(argv[i], "%lf:%7[a-z]:%d:%d", &t, kind, &ev.a, &ev.b);
             Event up = ev; up.kind = 5; up.frame += 48000 * 8 / 100;
@@ -42,6 +49,7 @@ int main(int argc, char** argv) {
             else if (ev.kind == 1) { uint8_t m[3] = {0x80, (uint8_t)ev.a, 0x40}; e.midi(m, 3); }
             else if (ev.kind == 2) e.turn(ev.a);
             else if (ev.kind == 3) e.set_pot(ev.a, ev.b, ev.c);
+            else if (ev.kind == 7) e.midi(ev.bytes, ev.count);
             else if (ev.kind == 6) { uint8_t l[16]; e.leds(l); printf("leds %.2f", ev.frame / 48000.0); for (int j = 0; j < 16; j++) printf(" %02X", l[j]); printf("|"); }
             else e.key(ev.a, ev.b, ev.kind == 4);
         }

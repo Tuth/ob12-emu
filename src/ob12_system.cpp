@@ -5,7 +5,7 @@
 //   OB12_DIRECT=n    send one note per channel 0..n-1 straight to the Slave, 1 s apart
 //   OB12_NOTE_CH=c   send one note on channel c straight to the Slave. It breaks running
 //                    status: the Master's next data bytes then read as notes. Use for study only
-//   OB12_MIDI_EVENTS=t:on:nn,t:off:nn  timed note on and off, note hex, channel 0, to the Master
+//   OB12_MIDI_EVENTS=t:on:nn,t:off:nn,t:pc:nn  timed note on, off, program change, hex, channel 0, to the Master
 //   OB12_MIDI_NOTES=3C,40  send these notes on MIDI channel 0 to the Master, 0.5 s apart
 //   OB12_VOICE_TRACE=chip,first,last  print one sample of a chip for a PC range, hex
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
@@ -126,7 +126,7 @@ struct Host {
                 int address = (buffer[0] << 8 | buffer[1]) & 0x1ff;
                 dsp->cmem[address] = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
                 updates++;
-                if (log) fprintf(log, "%.4f W %d C%03X %06X\n", *clock, chip, address, dsp->cmem[address] & 0xffffff);
+                if (log) fprintf(log, "%.6f W %d C%03X %06X\n", *clock, chip, address, dsp->cmem[address] & 0xffffff);
                 buffer.clear();
             }
             break;
@@ -291,7 +291,7 @@ int main(int argc, char** argv) {
     if (const char* list = getenv("OB12_MIDI_EVENTS")) {
         double at; char kind[4]; int note, used;
         while (sscanf(list, "%lf:%3[a-z]:%x%n", &at, kind, &note, &used) == 3) {
-            midi_events.push_back({at, (u8)(kind[1] == 'n' ? 0x90 : 0x80), (u8)note});
+            midi_events.push_back({at, (u8)(kind[0] == 'p' ? 0xC0 : kind[1] == 'n' ? 0x90 : 0x80), (u8)note});  // t:pc:nn program change
             list += used;
             if (*list == ',') list++;
         }
@@ -534,7 +534,8 @@ int main(int argc, char** argv) {
             }
             while (next_event < midi_events.size() && now >= midi_events[next_event].at) {
                 auto& ev = midi_events[next_event++];
-                m->midi_in({ev.status, ev.note, (u8)(ev.status == 0x90 ? 0x64 : 0x40)});
+                if (ev.status == 0xC0) m->midi_in({ev.status, ev.note});
+                else m->midi_in({ev.status, ev.note, (u8)(ev.status == 0x90 ? 0x64 : 0x40)});
             }
             if (next_midi < midi_notes.size() && now >= note_at + next_midi * 0.5) {
                 m->midi_in({0x90, midi_notes[next_midi], 0x64});

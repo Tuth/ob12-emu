@@ -13,6 +13,8 @@
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivstmidicontrollers.h"
+#include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/vsttypes.h"
 #include <algorithm>
 #include <atomic>
@@ -28,6 +30,10 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 namespace {
+
+// VST3 hands controllers to a plug-in as parameters, found through IMidiMapping: ids 0..127 are
+// CC 0..127, 128 channel pressure, 129 pitch bend. They are hidden from the host's parameter list.
+const int midi_params = kCountCtrlNumber;  // 130
 
 const TUID class_id = INLINE_UID(0x0B120B12, 0x6F1C4A3E, 0x9D27C5A8, 0x12DA5F70);
 HINSTANCE module_handle = nullptr;
@@ -212,28 +218,44 @@ public:
     tresult PLUGIN_API setComponentState(IBStream*) override { return kResultOk; }
     tresult PLUGIN_API setState(IBStream*) override { return kResultOk; }
     tresult PLUGIN_API getState(IBStream*) override { return kResultOk; }
-    int32 PLUGIN_API getParameterCount() override { return 0; }
-    tresult PLUGIN_API getParameterInfo(int32, ParameterInfo&) override { return kInvalidArgument; }
+    int32 PLUGIN_API getParameterCount() override { return midi_params; }
+    tresult PLUGIN_API getParameterInfo(int32 index, ParameterInfo& info) override {
+        if (index < 0 || index >= midi_params) return kInvalidArgument;
+        info = {};
+        info.id = index;
+        char name[32];
+        if (index == kPitchBend) snprintf(name, sizeof name, "Pitch Bend");
+        else if (index == kAfterTouch) snprintf(name, sizeof name, "Aftertouch");
+        else snprintf(name, sizeof name, "MIDI CC %d", index);
+        copy_ascii(info.title, name);
+        copy_ascii(info.shortTitle, name);
+        info.stepCount = index == kPitchBend ? 0 : 127;
+        info.defaultNormalizedValue = index == kPitchBend ? 0.5 : 0;
+        info.flags = ParameterInfo::kIsHidden;
+        return kResultOk;
+    }
     tresult PLUGIN_API getParamStringByValue(ParamID, ParamValue, String128) override { return kInvalidArgument; }
     tresult PLUGIN_API getParamValueByString(ParamID, TChar*, ParamValue&) override { return kInvalidArgument; }
     ParamValue PLUGIN_API normalizedParamToPlain(ParamID, ParamValue v) override { return v; }
     ParamValue PLUGIN_API plainParamToNormalized(ParamID, ParamValue v) override { return v; }
-    ParamValue PLUGIN_API getParamNormalized(ParamID) override { return 0; }
-    tresult PLUGIN_API setParamNormalized(ParamID, ParamValue) override { return kResultOk; }
+    ParamValue PLUGIN_API getParamNormalized(ParamID id) override { return id < (ParamID)midi_params ? values[id] : 0; }
+    tresult PLUGIN_API setParamNormalized(ParamID id, ParamValue v) override { if (id < (ParamID)midi_params) values[id] = v; return kResultOk; }
     tresult PLUGIN_API setComponentHandler(IComponentHandler*) override { return kResultOk; }
     IPlugView* PLUGIN_API createView(FIDString name) override;
 
 private:
     Plugin& plugin;
+    ParamValue values[midi_params] = {};
 };
 
-class Plugin final : public IComponent, public IAudioProcessor, public IProcessContextRequirements {
+class Plugin final : public IComponent, public IAudioProcessor, public IProcessContextRequirements, public IMidiMapping {
 public:
     tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
         if (FUnknownPrivate::iidEqual(iid, FUnknown::iid) || FUnknownPrivate::iidEqual(iid, IPluginBase::iid) || FUnknownPrivate::iidEqual(iid, IComponent::iid)) { addRef(); *obj = static_cast<IComponent*>(this); return kResultOk; }
         if (FUnknownPrivate::iidEqual(iid, IAudioProcessor::iid)) { addRef(); *obj = static_cast<IAudioProcessor*>(this); return kResultOk; }
         if (FUnknownPrivate::iidEqual(iid, IProcessContextRequirements::iid)) { addRef(); *obj = static_cast<IProcessContextRequirements*>(this); return kResultOk; }
         if (FUnknownPrivate::iidEqual(iid, IEditController::iid)) { addRef(); *obj = &facet; return kResultOk; }
+        if (FUnknownPrivate::iidEqual(iid, IMidiMapping::iid)) { addRef(); *obj = static_cast<IMidiMapping*>(this); return kResultOk; }
         *obj = nullptr;
         return kNoInterface;
     }
@@ -284,25 +306,65 @@ public:
     uint32 PLUGIN_API getTailSamples() override { return kInfiniteTail; }
     uint32 PLUGIN_API getProcessContextRequirements() override { return 0; }
 
+    tresult PLUGIN_API getMidiControllerAssignment(int32 bus, int16, CtrlNumber number, ParamID& id) override {
+        if (bus != 0 || number < 0 || number >= midi_params) return kResultFalse;
+        id = (ParamID)number;
+        return kResultTrue;
+    }
+
     tresult PLUGIN_API process(ProcessData& data) override {
         Instrument* inst = instrument.get();
-        if (inst && inst->engine && data.inputEvents) {
-            int32 count = data.inputEvents->getEventCount();
-            for (int32 i = 0; i < count; i++) {
-                Event e{};
-                if (data.inputEvents->getEvent(i, e) != kResultOk) continue;
-                uint8_t m[3];
-                // The Master takes one channel; every host channel goes to it.
-                if (e.type == Event::kNoteOnEvent) {
-                    m[0] = 0x90; m[1] = (uint8_t)std::clamp<int>(e.noteOn.pitch, 0, 127);
-                    m[2] = (uint8_t)std::max(1, (int)std::lround(e.noteOn.velocity * 127));
-                    inst->engine->midi(m, 3);
-                } else if (e.type == Event::kNoteOffEvent) {
-                    m[0] = 0x80; m[1] = (uint8_t)std::clamp<int>(e.noteOff.pitch, 0, 127);
-                    m[2] = (uint8_t)std::lround(e.noteOff.velocity * 127);
-                    inst->engine->midi(m, 3);
+        if (inst && inst->engine) {
+            // Notes, pressure and controller changes go to the Master's MIDI input in sample order.
+            struct Message { int32 offset; int order; uint8_t bytes[3]; int count; };
+            std::vector<Message> list;
+            int order = 0;
+            if (data.inputEvents) {
+                int32 count = data.inputEvents->getEventCount();
+                for (int32 i = 0; i < count; i++) {
+                    Event e{};
+                    if (data.inputEvents->getEvent(i, e) != kResultOk) continue;
+                    // The Master takes one channel; every host channel goes to it.
+                    Message m{e.sampleOffset, order++, {}, 3};
+                    if (e.type == Event::kNoteOnEvent) {
+                        m.bytes[0] = 0x90; m.bytes[1] = (uint8_t)std::clamp<int>(e.noteOn.pitch, 0, 127);
+                        m.bytes[2] = (uint8_t)std::max(1, (int)std::lround(e.noteOn.velocity * 127));
+                    } else if (e.type == Event::kNoteOffEvent) {
+                        m.bytes[0] = 0x80; m.bytes[1] = (uint8_t)std::clamp<int>(e.noteOff.pitch, 0, 127);
+                        m.bytes[2] = (uint8_t)std::lround(e.noteOff.velocity * 127);
+                    } else if (e.type == Event::kPolyPressureEvent) {
+                        m.bytes[0] = 0xA0; m.bytes[1] = (uint8_t)std::clamp<int>(e.polyPressure.pitch, 0, 127);
+                        m.bytes[2] = (uint8_t)std::clamp<int>((int)std::lround(e.polyPressure.pressure * 127), 0, 127);
+                    } else continue;
+                    list.push_back(m);
                 }
             }
+            if (IParameterChanges* changes = data.inputParameterChanges) {
+                int32 count = changes->getParameterCount();
+                for (int32 i = 0; i < count; i++) {
+                    IParamValueQueue* queue = changes->getParameterData(i);
+                    if (!queue) continue;
+                    ParamID id = queue->getParameterId();
+                    if (id >= (ParamID)midi_params) continue;
+                    for (int32 p = 0; p < queue->getPointCount(); p++) {
+                        int32 offset = 0;
+                        ParamValue v = 0;
+                        if (queue->getPoint(p, offset, v) != kResultOk) continue;
+                        Message m{offset, order++, {}, 3};
+                        if (id == kPitchBend) {
+                            int bend = std::clamp((int)std::lround(v * 16383), 0, 16383);
+                            m.bytes[0] = 0xE0; m.bytes[1] = bend & 0x7f; m.bytes[2] = bend >> 7;
+                        } else if (id == kAfterTouch) {
+                            m.bytes[0] = 0xD0; m.bytes[1] = (uint8_t)std::clamp((int)std::lround(v * 127), 0, 127); m.count = 2;
+                        } else {
+                            m.bytes[0] = 0xB0; m.bytes[1] = (uint8_t)id; m.bytes[2] = (uint8_t)std::clamp((int)std::lround(v * 127), 0, 127);
+                        }
+                        list.push_back(m);
+                    }
+                }
+            }
+            std::stable_sort(list.begin(), list.end(), [](const Message& a, const Message& b) { return a.offset < b.offset; });
+            for (auto& m : list) inst->engine->midi(m.bytes, m.count);
         }
         if (data.numSamples <= 0 || data.numOutputs < 1 || !data.outputs || data.outputs[0].numChannels < 1) return kResultOk;
         auto& out = data.outputs[0];
