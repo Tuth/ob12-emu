@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Portamento works; effects have never run so far: real reload timer starts them, right channel then silent",
+    "phase": "Effects run by default, right channel alive: primary 43 reuses the last C; PR #3 finding 4 contradicted, correction awaits approval",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -56,7 +56,6 @@
       "Notes through the Master reach the DSPs; third note sounds; direct injection shown to break running status",
       "Mode secondaries act after the primary: table stride 0x15 confirmed by firmware constants; CMEM tables no longer destroyed",
       "Primary 3E flag 8 as compare and two-step pointer secondaries: tables survive, signal passes the filter stage, pitch measured",
-      "Primary 43 as unsigned low word product 24 bits down: bus flatness 0.77 to 0.06, note 48 at 261.5 Hz, chord at 131, 165, 196 Hz",
       "A/D is read as 8 bits: pots at 80 open MOUT, clean tones without forcing; old sweep results retracted",
       "Panel map from schematics plus measurement; A0 07 Osc 1 FM, A0 08 Osc 1 LFO1 Depth, Noise needs secondary 34",
       "Master Volume curve measured; AOUT pointers C07F, C080 park on empty cells, forced pointers carry sound",
@@ -76,7 +75,8 @@
       "CPU load 6.56 to about 4.4 cores at real time; offline 1.96 x with profile guidance; output identical",
       "Two half frames per gate: 2.21 x offline, output identical; load about 4.5 cores, floor near 3",
       "Bus wrap from Thor recording: six voice output adds saturate; 0 flips, 3 note run identical",
-      "FC0400 is reload timer 1; glide step modelled, Timeless LD follows the keys"
+      "FC0400 is reload timer 1; glide step modelled, Timeless LD follows the keys",
+      "Primary 43 multiplies DMEM by the held C word; real reload timer default; MOUT stereo with effects, detuned saw, 12 notes without clipping"
     ],
     "blocked": []
   },
@@ -90,8 +90,9 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Effects: run with OB12_RELOAD=1, find why MOUT right goes silent, then make the real timer the default",
-    "Find the real AOVM mechanism at the bus adds; check voice level, a single note peaks at 3.3M of 8.4M",
+    "Correct PR #3 finding 4 upstream, only with explicit approval",
+    "Bus sum saturation: resonance sweep still wraps without it, check against the real mechanism",
+    "AOUT left constant 113",
     "CPU: faster step() is what lowers the floor",
     "Font polish: selected rows, real font sizes per number, glyphs above 7F, or a real flash dump",
     "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",

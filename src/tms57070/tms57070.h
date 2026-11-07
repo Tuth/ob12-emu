@@ -26,6 +26,7 @@ struct Options {
     bool maclo_unsigned = false;     // primary 43 takes the low MAC word as unsigned
     bool maclo_shift = false;        // primary 43 product sits 24 bits lower, for double precision
     bool compare_3e = false;         // primary 3E flag 8 compares DMEM with CMEM, flags only
+    bool reuse_coefficient = false;  // primary 43 multiplies DMEM by the last multiplier C word
     bool bus_sum_saturates = false;  // the OB-12 voice output adds clip instead of wrapping
 };
 
@@ -99,6 +100,7 @@ private:
     int output_shift() const;
     int round_bits() const;
 
+    int32_t last_coefficient = 0;
     uint32_t alu_last = 0;
     uint32_t noise_state = 0x1234567;
     bool lock_pending = false;

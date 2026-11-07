@@ -503,6 +503,8 @@ Open:
 
 ## Low MAC word multiply (firmware evidence, not checked on silicon)
 
+**Retracted**: see "Primary 43 keeps the last C" at the end of this file.
+
 **Retraction.** "D0A4, D061, D09E are the noise" was a suspicion and it is false. Period
 correlation per cell (`tools/cell_period.py`) showed only D048, D0AD and what they feed were
 aperiodic: D048 0.09, D09C 0.08. D0A4 and D061 still run near Nyquist, but they do not reach
@@ -1322,7 +1324,65 @@ The right input is good at D00C and D004. D007 stays near 0 while D003 carries s
 reach the output at 068, 06B. Words between are not traced. XMEM is modelled; the two read
 paths may clash, unproven. That is why the default stays glide only: dry and stereo.
 
+**Answered**: not XMEM. See "Primary 43 keeps the last C" below; the real timer is now the default.
+
 New reference: MD5 2a42ebfc79fe39677a8678bf0246c54b, `ob12_system` and the engine agree.
 
 Open: find why the effect path drops the right channel, then turn the real timer on. Rate of the
 timer. Slave timer 0 and other vectors are still unset.
+
+## Primary 43 keeps the last C: effects run, right channel back (firmware evidence, not checked on silicon)
+
+**Retraction.** "Low MAC word multiply" above is wrong, and so is finding 4 in `docs/PR-TMS57070.md`.
+Its shift and unsigned options made the noise go away, but they did not model anything: they turned
+the term nearly to nothing. And "all sound here has been dry" was only half the fault. The timbre
+was wrong too: a single note had odd lines only (131, 392 Hz) and peaked at 3.3M, too hot for 12
+voices.
+
+Where the right channel was lost: DASP4, words 0E8 `43462937` and 166 `4348288A`, the R lanes after
+the L lanes `42002136` and `4200212C`. Same structure, but the L lane multiplies DMEM by CMEM and
+the old model made the R lane multiply by the low MAC word.
+
+Evidence for the new model. All five uses of primary 43 in the images, from `tools/scan43.py`:
+
+| Program | Word | Secondary | Word before |
+|---|---|---|---|
+| 0, 1 | 0DD `43C81280` | 08 | `6C001881` |
+| 0, 1 | 154 `43C8128B` | 08 | `6C00188C` |
+| 0, 1 | 1BF `43C81296` | 08 | `6C001897` |
+| 4 | 0E8 `43462937` | 06 | `42002136` |
+| 4 | 166 `4348288A` | 08 | `4200212C` |
+
+Each is paired with a secondary that takes the C bus, and each directly follows a primary that
+multiplies by C. So 43 is the form of 42 for when the C bus is busy: DMEM times the C word the
+multiplier still holds. Option `reuse_coefficient`, on by default, `OB12_MACLO=1` for the old model.
+
+Which primaries set the held word is not settled by this: latching on 42 only, or on 40, 42, 6C
+and 70, gives byte identical WAV for note 3C, with C 1D333A at 0DD and 154, and 26F0BB at 1BF
+either way. The code latches on all four.
+
+The real reload timer is now the default too, `OB12_NO_RELOAD=1` for the glide only form.
+
+Measured, MOUT, 14 to 16.5 s:
+
+| Case | Old model, no timer or timer | New model, timer |
+|---|---|---|
+| Note 3C, left | RMS 2345523 dry, 1244914 with timer | RMS 234275, peak 786929 |
+| Note 3C, right | constant -9 with timer | RMS 129655, peak 530329 |
+| Note 3C, lines | 131, 392 and odd lines | 130.0, 130.8, 132.4, 260.4, 261.6, 265.2 |
+| Notes 3C, 40, 43, L, R | R constant -9 with timer | RMS 314729, 242124 |
+
+Detuned saw pairs instead of an odd line series, which fits Fat Pad. Left and right now differ, as
+effects should. 12 notes, no pots: MOUT peaks 2955067, 3146604, bus peaks 1210177, 785738, no
+clipping, no wraps. The boot program needs no voice level correction for that any more.
+
+Resonance sweep at maximum, with saturation at the bus adds off: wraps remain at A13B2122, A13B2139,
+210921E2, 21A6B000, 213 and 137 flips at MOUT. With saturation on: no flips, top held 73% and 70%
+of the time. So `bus_sum_saturates` stays, and the earlier sweep clipping stays unexplained in part.
+Timeless LD by encoder still follows the keys: lines 133, 260, 520 after glide.
+
+`ob12_system` and the engine agree, MD5 c27fe2d73360c82764c3284a09f4d5c8 for notes 3C, 40, 43 at
+16 s. This replaces the earlier reference.
+
+Open: AOUT left still constant 113. Timer rate is inferred. No recording of a real OB-12 has been
+compared, so "fits Fat Pad" is a reading of the spectrum, not a match.

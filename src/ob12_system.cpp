@@ -29,7 +29,8 @@
 //   OB12_LIVE_SILENT=1  same timing, zeros to the device
 //   OB12_LIVE_MS=n   buffer length in ms, default 10; OB12_LIVE_BUFFERS=n, default 6
 //   OB12_LIVE_MIDI=d  take notes from MIDI input device d; OB12_LIVE_MIDI=list prints them
-//   OB12_RELOAD=1    run reload timer 1 in full; effects start, right channel goes silent
+//   OB12_NO_RELOAD=1  no reload timer 1: dry sound, glide only
+//   OB12_MACLO=1     primary 43 as low MAC word multiply, the old model
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
 //   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
 //   OB12_POT_STEPS=t:channel:mux:value,...  one pot jumps at t seconds, value hex
@@ -178,6 +179,7 @@ int main(int argc, char** argv) {
     options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
     options.compare_3e = getenv("OB12_NO_3E") == nullptr;
     options.bus_sum_saturates = getenv("OB12_BUS_WRAP") == nullptr;
+    options.reuse_coefficient = getenv("OB12_MACLO") == nullptr;
     options.maclo_shift = getenv("OB12_MACLO_NO_SHIFT") == nullptr;
     options.maclo_unsigned = getenv("OB12_MACLO_SIGNED") == nullptr;
     options.queued_pointer_load = getenv("OB12_EARLY_POINTER") == nullptr;
@@ -300,7 +302,7 @@ int main(int argc, char** argv) {
         }
     }
     if (const char* text = getenv("OB12_SLAVE_WATCH")) sscanf(text, "%x,%x", &s->watch_lo, &s->watch_hi);
-    bool full_reload = getenv("OB12_RELOAD") != nullptr;  // study: the real timer 1, which starts the effects
+    bool full_reload = getenv("OB12_NO_RELOAD") == nullptr;  // timer 1 starts the effects; off leaves glide only
     int slave_tick = getenv("OB12_SLAVE_TICK") ? atoi(getenv("OB12_SLAVE_TICK")) : 96;
     std::vector<int> cell_pick;  // study: OB12_CELL_PICK=10,42 logs only these DMEM cells
     if (const char* list = getenv("OB12_CELL_PICK")) for (const char* c = list; c; c = strchr(c, ','), c = c ? c + 1 : c) cell_pick.push_back((int)strtol(c, nullptr, 16));

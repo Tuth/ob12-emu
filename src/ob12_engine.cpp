@@ -184,7 +184,7 @@ struct Engine::Impl {
         encoder_step();
         if (k % 96 == 0) {
             s->ppg_tick();
-            if (k % 192 == 0) s->glide_tick();
+            s->reload_tick();
             take_inputs();
             if (k % 3072 == 0) {
                 std::lock_guard<std::mutex> hold(lcd_lock);
@@ -273,6 +273,7 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     options.maclo_unsigned = true;
     options.queued_pointer_load = true;
     options.bus_sum_saturates = true;
+    options.reuse_coefficient = true;
 
     e.m = new master::Master();
     e.s = new slave::Slave();

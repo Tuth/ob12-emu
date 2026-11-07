@@ -113,9 +113,7 @@ public:
         update_irq();
     }
     void reload_tick() { timer[1].tmcsr |= 0x04; }  // UF; rate unknown, taken as 1 ms
-    // What FC0400 does every second call, alone. The full timer also starts the effects, whose right
-    // channel is still silent, see "Reload timer" in docs/HARDWARE.md.
-    void glide_tick() { ram[0xd15a] = 1; }
+    void glide_tick() { ram[0xd15a] = 1; }  // what FC0400 does every second call, for OB12_NO_RELOAD
     void ppg_tick() { io[0x30] |= 0x08; }  // PUF0; the rate is set by the missing boot
 
     long steps = 0;

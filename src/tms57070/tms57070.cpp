@@ -332,17 +332,22 @@ void Core::primary(uint32_t word) {
     case 0x40: case 0x41: case 0x44: case 0x45: case 0x48: case 0x49: case 0x4c: case 0x4d: {
         int32_t a = acc[op & 1];
         int32_t c = cmem[cmem_operand(word)];
+        last_coefficient = c;
         multiply(unit, pick(c, op & 4), pick(a, op & 8), negate);
         break;
     }
     case 0x42: case 0x46: case 0x4a: case 0x4e: {
         int32_t c = cmem[cmem_operand(word)];
         int32_t d = dmem[dmem_operand(word)];
+        last_coefficient = c;
         multiply(unit, pick(c, op & 4), pick(d, op & 8), negate);
         break;
     }
     case 0x43: case 0x47: case 0x4b: case 0x4f:
-        if (options.maclo_multiply) {
+        if (options.reuse_coefficient) {
+            // Always paired with a secondary that takes the C bus; the multiplier keeps its last C.
+            multiply(unit, pick(last_coefficient, op & 4), pick(dmem[dmem_operand(word)], op & 8), negate);
+        } else if (options.maclo_multiply) {
             int32_t d = dmem[dmem_operand(word)];
             bool is_unsigned = op & 8;
             int64_t low = options.maclo_unsigned ? (int64_t)mac_lower(mac[unit]) : (int64_t)s24(mac_lower(mac[unit]));
@@ -380,12 +385,14 @@ void Core::primary(uint32_t word) {
     case 0x6c: case 0x6d: case 0x6e: case 0x6f: {
         int32_t c = cmem[cmem_operand(word)];
         int32_t d = dmem[dmem_operand(word)];
+        last_coefficient = c;
         accumulate(unit, pick(c, op & 1), pick(d, op & 2), negate);
         break;
     }
     case 0x70: case 0x71: {
         int32_t c = cmem[cmem_operand(word)];
         int32_t d = dmem[dmem_operand(word)];
+        last_coefficient = c;
         if (field(CR1, 14, 2) == 0) mac_shift(unit, -24);
         accumulate(unit, pick(c, op & 1), d, negate);
         break;
