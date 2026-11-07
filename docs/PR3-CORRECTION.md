@@ -1,8 +1,7 @@
 # Draft: correction to PR #3, finding 4
 
 Status: sent with Thor's approval, 2026-11-07: https://github.com/Prehistoricman/TMS57070/pull/3#issuecomment-6700756737, commit d1531ba on the PR branch,
-finding 4 replaced in the description. The "Result with all four" section there still gives
-numbers from the old model.
+finding 4 and the "Result with all four" section replaced in the description.
 
 Sent as: one commit on `Tuth/TMS57070` branch `ob12-findings`
 (`F:\Claude\OB-12-pr\ob12-fix-43.patch`), this comment on
@@ -63,7 +62,7 @@ use has a secondary on the C bus and directly follows a multiply by CMEM, so thi
 of 42 for when the C bus is taken. The multiplier keeps the last C word. Replaces an earlier version
 of this finding, low MAC word times DMEM, which silenced the right channel once effects ran.
 
-## Draft, not sent: new Result section for the PR description
+## New Result section for the PR description, sent 2026-11-07
 
 ## Result with all four
 

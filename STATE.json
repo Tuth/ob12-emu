@@ -90,7 +90,6 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "PR #3 description: Result section still has old model numbers, update only with approval",
     "Bus sum saturation: resonance sweep still wraps without it, check against the real mechanism",
     "AOUT left constant 113",
     "CPU: faster step() is what lowers the floor",
