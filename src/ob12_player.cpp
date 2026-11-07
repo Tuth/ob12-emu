@@ -69,6 +69,11 @@ int main(int argc, char** argv) {
     AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
     HWND frame = CreateWindowW(L"OB12Player", L"OB-12", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, wc.hInstance, nullptr);
     view->attach(frame);
+    view->on_width_request([frame](int w) {
+        RECT r = {0, 0, w, (int)(w / art_aspect)};
+        AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+        SetWindowPos(frame, nullptr, 0, 0, r.right - r.left, r.bottom - r.top, SWP_NOMOVE | SWP_NOZORDER);
+    });
     MSG message;
     while (GetMessageW(&message, nullptr, 0, 0)) {
         TranslateMessage(&message);

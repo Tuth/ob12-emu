@@ -124,6 +124,33 @@ struct Instrument {
 
 class Plugin;
 
+constexpr int min_editor_width = 600;
+
+// The chosen size is the user's, so it lives per user, not in the project.
+static std::string editor_width_file(bool make_folder) {
+    const char* base = getenv("LOCALAPPDATA");
+    if (!base) return "";
+    std::string folder = std::string(base) + "\\OB12";
+    if (make_folder) CreateDirectoryA(folder.c_str(), nullptr);
+    return folder + "\\editor_width.txt";
+}
+
+static int load_editor_width() {
+    int width = PanelView::base_width;
+    if (FILE* f = fopen(editor_width_file(false).c_str(), "r")) {
+        if (fscanf(f, "%d", &width) != 1) width = PanelView::base_width;
+        fclose(f);
+    }
+    return std::clamp(width, min_editor_width, 6000);
+}
+
+static void save_editor_width(int width) {
+    if (FILE* f = fopen(editor_width_file(true).c_str(), "w")) {
+        fprintf(f, "%d\n", width);
+        fclose(f);
+    }
+}
+
 class Editor final : public IPlugView {
 public:
     Editor(Plugin& owner, Engine& engine);
@@ -146,6 +173,7 @@ public:
         if (!r) return kInvalidArgument;
         size = *r;
         view.resize(r->getWidth(), r->getHeight());
+        save_editor_width(r->getWidth());
         return kResultOk;
     }
     tresult PLUGIN_API onFocus(TBool) override { return kResultOk; }
@@ -153,13 +181,19 @@ public:
     tresult PLUGIN_API canResize() override { return kResultTrue; }
     tresult PLUGIN_API checkSizeConstraint(ViewRect* r) override {
         if (!r) return kInvalidArgument;
-        int w = std::max(800, r->getWidth());
+        int w = std::max(min_editor_width, r->getWidth());
         r->right = r->left + w;
         r->bottom = r->top + (int)std::lround(w / view.aspect());
         return kResultTrue;
     }
 
 private:
+    void request_width(int width) {
+        ViewRect r{0, 0, width, (int)std::lround(width / view.aspect())};
+        if (!frame || frame->resizeView(this, &r) != kResultOk) return;
+        if (size.getWidth() != width) onSize(&r);  // not every host calls back
+    }
+
     std::atomic<uint32> refs{1};
     Plugin& owner;
     PanelView view;
@@ -304,7 +338,9 @@ private:
 
 Editor::Editor(Plugin& p, Engine& engine) : owner(p), view(engine, rom_folder() + "\\panel.ob12p") {
     static_cast<IComponent&>(owner).addRef();
-    size.bottom = (int)std::lround(1500 / view.aspect());
+    size.right = load_editor_width();
+    size.bottom = (int)std::lround(size.right / view.aspect());
+    view.on_width_request([this](int width) { request_width(width); });
 }
 Editor::~Editor() { view.detach(); static_cast<IComponent&>(owner).release(); }
 

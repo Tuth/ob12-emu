@@ -4,6 +4,8 @@
 #include <windowsx.h>
 #include <d2d1.h>
 #include <algorithm>
+#include <cstdlib>
+#include <cwchar>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -27,6 +29,9 @@ struct Run {
     ID2D1PathGeometry* geometry = nullptr;
 };
 
+constexpr int scale_command = 1000;  // menu id is this plus the percentage
+constexpr int scale_percents[] = {50, 67, 75, 100, 125, 150, 200};
+
 D2D1_COLOR_F color(uint32_t argb) {
     return D2D1::ColorF(((argb >> 16) & 255) / 255.f, ((argb >> 8) & 255) / 255.f, (argb & 255) / 255.f, (argb >> 24) / 255.f);
 }
@@ -46,6 +51,7 @@ struct PanelView::Impl {
     ID2D1SolidColorBrush* brush = nullptr;
     std::vector<Run> runs;
     float art_w = 472, art_h = 126;
+    std::function<void(int)> width_request;
     int width = 0, height = 0;
 
     int pot_value[sizeof panel_pots / sizeof panel_pots[0]];
@@ -176,6 +182,21 @@ struct PanelView::Impl {
         release(art); release(lcd); release(brush); release(target);
     }
 
+    void scale_menu(LPARAM at) {
+        if (!width_request) return;
+        HMENU menu = CreatePopupMenu();
+        for (int percent : scale_percents) {
+            wchar_t text[16];
+            swprintf(text, 16, L"%d%%", percent);
+            bool now = std::abs(width - PanelView::base_width * percent / 100) < 4;
+            AppendMenuW(menu, MF_STRING | (now ? MF_CHECKED : 0), scale_command + percent, text);
+        }
+        POINT p = {GET_X_LPARAM(at), GET_Y_LPARAM(at)};
+        ClientToScreen(window, &p);
+        TrackPopupMenu(menu, TPM_RIGHTBUTTON, p.x, p.y, 0, window, nullptr);
+        DestroyMenu(menu);
+    }
+
     float sx() const { return std::min(width / art_w, height / art_h) * art_w / panel_frame_w; }
 
     void paint() {
@@ -277,6 +298,12 @@ struct PanelView::Impl {
         case WM_LBUTTONDOWN: self->mouse_down(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)); return 0;
         case WM_MOUSEMOVE: self->mouse_move(GET_Y_LPARAM(lparam)); return 0;
         case WM_LBUTTONUP: self->mouse_up(); return 0;
+        case WM_RBUTTONUP: self->scale_menu(lparam); return 0;
+        case WM_COMMAND: {
+            int percent = (int)LOWORD(wparam) - scale_command;
+            if (percent > 0 && percent <= 400 && self->width_request) self->width_request(PanelView::base_width * percent / 100);
+            return 0;
+        }
         case WM_MOUSEWHEEL: self->engine.turn(GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA); return 0;
         }
         return DefWindowProcW(hwnd, message, wparam, lparam);
@@ -341,3 +368,5 @@ void PanelView::resize(int width, int height) {
 }
 
 float PanelView::aspect() const { return impl->art_w / impl->art_h; }
+
+void PanelView::on_width_request(std::function<void(int)> request) { impl->width_request = std::move(request); }
