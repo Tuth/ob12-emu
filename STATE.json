@@ -81,7 +81,8 @@
       "Editor size menu 50 to 200%, width kept per user; display font 5 x 7 dot matrix",
       "CPU rise explained: machine state, not code; current code 13% faster than 81dfb3b on equal terms",
       "CPU clock exactly 16 MHz: overrun carried, slices 167/167/166; was +2.7% Master, +4.2% Slave; reference d2d0db68",
-      "A-004 Canada ring fixed: DASP4 XMEM 128K words (board DRAM) and XMEM read pipeline; effect buffers no longer overlap; reference 12b99e29"
+      "A-004 Canada ring fixed: DASP4 XMEM 128K words (board DRAM) and XMEM read pipeline; effect buffers no longer overlap; reference 12b99e29",
+      "Panel positions from the vector art (Amp sliders were one track off); LCD drawn as an even dot matrix"
     ],
     "blocked": []
   },
@@ -95,6 +96,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "Panel: map the 48 LED circles to firmware LED bits and light them; draw knobs turning",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",
     "Delay: measure echo time against TIME and repeats against FEEDBACK on more programs",
     "Encoder: three detents at once step four programs",

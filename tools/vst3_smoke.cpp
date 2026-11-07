@@ -58,6 +58,8 @@ static void test_scale(IComponent* component) {
         view->getSize(&size);
         printf("%d%%%s: view %d x %d, window %ld x %ld\n", percent, frame.calls_back ? "" : " (host silent)", size.getWidth(), size.getHeight(), rc.right, rc.bottom);
     }
+    if (const char* p = getenv("OB12_PANEL_SHOT_PERCENT")) SendMessageW(child, WM_COMMAND, 1000 + atoi(p), 0);
+    if (getenv("OB12_PANEL_SHOT")) SendMessageW(child, WM_COMMAND, 1999, 0);  // the panel saves itself, off screen
     SendMessageW(child, WM_COMMAND, 1000 + 75, 0);
     view->removed();
     view->release();

@@ -1748,3 +1748,28 @@ Not settled; nothing changed.
 
 Decision (Thor, 2026-11-07): Resonance 127 stays firmware-true, damping 0, no limiter. Revisit only
 with a recording of a real unit.
+
+## Panel: positions from the vector art, LCD as a dot matrix (measured)
+
+Thor: controls sit off the original, the Amp Attack slider seems missing, and the LCD strokes vary
+in thickness. He pointed out the art is vector, so every position is in it.
+
+Positions. `rom/panel.ob12p` parsed into figures: 25 slider tracks of 8 x 88, 79 key ellipses of
+40 x 20, 48 small circles of 12 x 12 (LEDs, not yet mapped), and 28 knobs, each two stacks of
+about 130 gradient polygons of 64 x 56 offset from each other; the knob centre is their midpoint.
+`src/panel_controls.h` now takes knob, slider and key centres from these. The cursor pad is one
+shape and stays by hand. Before, by eye: the Amp sliders sat 14 to 36 units right, so Attack's bar
+fell between Attack and Decay and every bar one track over; EQ and Volume 7 right and 7 low; knobs
+15 to 18 from the gradient stacks, a few units from their centres. Slider bars now move over the
+track's 88 units, not 104.
+
+LCD. The 240 x 64 bitmap was stretched with nearest neighbour to a non-integer size, so some pixel
+columns doubled. Now, as on the EII panel, every LCD pixel is a dot of 86% of its pitch with a gap,
+computed at the exact device size by area coverage and drawn 1:1; recomputed only when the
+content or size changes.
+
+Checking by eye: the panel saves itself as PNG off screen (hidden command 1999, `OB12_PANEL_SHOT`,
+`OB12_PANEL_SHOT_PERCENT`, `OB12_PANEL_BARE` for the art alone), from `vst3_smoke`. A screen copy
+was tried first and dropped: it grabbed whatever window was on top.
+
+Not done: LEDs, and knobs drawn turning rather than a pointer over the art.

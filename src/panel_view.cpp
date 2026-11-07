@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <d2d1.h>
+#include <wincodec.h>
 #include <algorithm>
 #include <cstdlib>
 #include <cwchar>
@@ -15,6 +16,8 @@
 #include "panel_controls.h"
 #include "panel_view.h"
 #pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "ole32.lib")
 
 namespace {
 
@@ -30,6 +33,7 @@ struct Run {
 };
 
 constexpr int scale_command = 1000;  // menu id is this plus the percentage
+constexpr int shot_command = 1999;   // hidden: save the panel to OB12_PANEL_SHOT as PNG
 constexpr int scale_percents[] = {50, 67, 75, 100, 125, 150, 200};
 
 D2D1_COLOR_F color(uint32_t argb) {
@@ -45,7 +49,8 @@ struct PanelView::Impl {
     Engine& engine;
     HWND window = nullptr;
     ID2D1Factory* factory = nullptr;
-    ID2D1HwndRenderTarget* target = nullptr;
+    ID2D1RenderTarget* target = nullptr;        // the window's, or a WIC bitmap's for save_image
+    ID2D1HwndRenderTarget* hwnd_target = nullptr;
     ID2D1Bitmap* art = nullptr;       // the panel at the current size
     ID2D1Bitmap* lcd = nullptr;
     ID2D1SolidColorBrush* brush = nullptr;
@@ -172,14 +177,16 @@ struct PanelView::Impl {
         GetClientRect(window, &rc);
         D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties();
         props.dpiX = props.dpiY = 96;  // one unit is one pixel
-        if (FAILED(factory->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(window, D2D1::SizeU(rc.right, rc.bottom)), &target))) return;
+        if (FAILED(factory->CreateHwndRenderTarget(props, D2D1::HwndRenderTargetProperties(window, D2D1::SizeU(rc.right, rc.bottom)), &hwnd_target))) return;
+        target = hwnd_target;
         target->CreateSolidColorBrush(D2D1::ColorF(0), &brush);
-        target->CreateBitmap(D2D1::SizeU(240, 64), D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)), &lcd);
+        lcd_valid = false;  // the LCD bitmap is made at its device size in draw_lcd
         render_art();
     }
 
     void drop_target() {
         release(art); release(lcd); release(brush); release(target);
+        hwnd_target = nullptr;
     }
 
     void scale_menu(LPARAM at) {
@@ -197,6 +204,117 @@ struct PanelView::Impl {
         DestroyMenu(menu);
     }
 
+    // The LCD as a dot matrix, like the EII panel: every pixel a dot of the same size with a gap,
+    // computed at the exact device size and drawn 1:1, so no column is doubled by scaling.
+    // A pixel's colour is the area of each dot it covers, so dots stay even at any scale.
+    std::vector<uint32_t> lcd_pixels;
+    uint8_t lcd_shown[30 * 64] = {};
+    int lcd_w = 0, lcd_h = 0;
+    bool lcd_valid = false;
+
+    // Per device column (or row): which LCD cells it overlaps and by how much of a dot.
+    static void dot_cover(int pixels, int cells, std::vector<int>& first, std::vector<float>& cover) {
+        const float pitch = (float)pixels / cells, dot = 0.86f;
+        first.assign(pixels, 0);
+        cover.assign(pixels * 3, 0.f);
+        for (int p = 0; p < pixels; p++) {
+            int c0 = std::min(cells - 1, (int)(p / pitch));
+            first[p] = c0;
+            for (int k = 0; k < 3 && c0 + k < cells; k++) {
+                float a = (c0 + k) * pitch, b = a + dot * pitch;
+                float lo = std::max(a, (float)p), hi = std::min(b, (float)p + 1);
+                cover[p * 3 + k] = std::max(0.f, hi - lo);
+            }
+        }
+    }
+
+    void draw_lcd(float s) {
+        int x0 = (int)lroundf(panel_lcd_x0 * s), y0 = (int)lroundf(panel_lcd_y0 * s);
+        int w = (int)lroundf(panel_lcd_x1 * s) - x0, h = (int)lroundf(panel_lcd_y1 * s) - y0;
+        if (w < 8 || h < 4) return;
+        bool fresh = engine.lcd(lcd_bits);
+        if (!fresh && !lcd_valid) return;
+        bool changed = fresh && memcmp(lcd_bits, lcd_shown, sizeof lcd_bits) != 0;
+        if (!lcd || w != lcd_w || h != lcd_h) {
+            release(lcd);
+            if (FAILED(target->CreateBitmap(D2D1::SizeU(w, h), D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)), &lcd))) return;
+            lcd_w = w; lcd_h = h;
+            changed = true;
+        }
+        if (changed || !lcd_valid) {
+            if (fresh) memcpy(lcd_shown, lcd_bits, sizeof lcd_bits);
+            std::vector<int> fx, fy;
+            std::vector<float> cx, cy;
+            dot_cover(w, 240, fx, cx);
+            dot_cover(h, 64, fy, cy);
+            // A set bit is background. Gap, unlit dot and lit dot colours, R G B.
+            const float gap[3] = {0xd2, 0xde, 0xe8}, off[3] = {0xc4, 0xd2, 0xde}, on[3] = {0x10, 0x20, 0x3a};
+            lcd_pixels.assign((size_t)w * h, 0);
+            for (int py = 0; py < h; py++) for (int px = 0; px < w; px++) {
+                float lit = 0, unlit = 0;
+                for (int j = 0; j < 3; j++) {
+                    float wy = cy[py * 3 + j];
+                    if (wy <= 0) continue;
+                    int row = fy[py] + j;
+                    for (int i = 0; i < 3; i++) {
+                        float wx = cx[px * 3 + i];
+                        if (wx <= 0) continue;
+                        int col = fx[px] + i;
+                        bool background = lcd_shown[row * 30 + (col >> 3)] & (0x80 >> (col & 7));
+                        (background ? unlit : lit) += wx * wy;
+                    }
+                }
+                float rest = std::max(0.f, 1 - lit - unlit);
+                uint32_t c = 0xff000000;
+                for (int k = 0; k < 3; k++) {
+                    float v = gap[k] * rest + off[k] * unlit + on[k] * lit;
+                    c |= (uint32_t)std::min(255.f, v + 0.5f) << (16 - 8 * k);
+                }
+                lcd_pixels[(size_t)py * w + px] = c;
+            }
+            lcd->CopyFromMemory(nullptr, lcd_pixels.data(), w * 4);
+            lcd_valid = true;
+        }
+        target->DrawBitmap(lcd, D2D1::RectF((float)x0, (float)y0, (float)(x0 + w), (float)(y0 + h)), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    }
+
+    // The panel drawn into a WIC bitmap and saved as PNG, off screen: for checking it by eye.
+    bool save_image(const char* path) {
+        drop_target();
+        IWICImagingFactory* wic = nullptr;
+        IWICBitmap* bitmap = nullptr;
+        bool ok = false;
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) &&
+            SUCCEEDED(wic->CreateBitmap(width, height, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bitmap))) {
+            D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+            if (SUCCEEDED(factory->CreateWicBitmapRenderTarget(bitmap, props, &target))) {
+                target->CreateSolidColorBrush(D2D1::ColorF(0), &brush);
+                lcd_valid = false;
+                render_art();
+                paint();
+                drop_target();
+                wchar_t wide[MAX_PATH];
+                MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, MAX_PATH);
+                IWICStream* stream = nullptr;
+                IWICBitmapEncoder* encoder = nullptr;
+                IWICBitmapFrameEncode* frame = nullptr;
+                if (SUCCEEDED(wic->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromFilename(wide, GENERIC_WRITE)) &&
+                    SUCCEEDED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) && SUCCEEDED(encoder->Initialize(stream, WICBitmapEncoderNoCache)) &&
+                    SUCCEEDED(encoder->CreateNewFrame(&frame, nullptr)) && SUCCEEDED(frame->Initialize(nullptr))) {
+                    frame->SetSize(width, height);
+                    WICPixelFormatGUID format = GUID_WICPixelFormat32bppPBGRA;
+                    frame->SetPixelFormat(&format);
+                    ok = SUCCEEDED(frame->WriteSource(bitmap, nullptr)) && SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
+                }
+                release(frame); release(encoder); release(stream);
+            }
+        }
+        release(bitmap); release(wic);
+        if (window) InvalidateRect(window, nullptr, FALSE);
+        return ok;
+    }
+
     float sx() const { return std::min(width / art_w, height / art_h) * art_w / panel_frame_w; }
 
     void paint() {
@@ -207,16 +325,9 @@ struct PanelView::Impl {
         if (art) target->DrawBitmap(art);
         float s = sx();
 
-        if (engine.lcd(lcd_bits) && lcd) {
-            static uint32_t pixels[240 * 64];
-            for (int y = 0; y < 64; y++) for (int x = 0; x < 240; x++) {
-                bool on = lcd_bits[y * 30 + (x >> 3)] & (0x80 >> (x & 7));
-                pixels[y * 240 + x] = on ? 0xffc4d2de : 0xff10203a;  // a set bit is background
-            }
-            lcd->CopyFromMemory(nullptr, pixels, 240 * 4);
-            target->DrawBitmap(lcd, D2D1::RectF(panel_lcd_x0 * s, panel_lcd_y0 * s, panel_lcd_x1 * s, panel_lcd_y1 * s), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
-        }
+        draw_lcd(s);
 
+        if (getenv("OB12_PANEL_BARE")) { target->EndDraw(); return; }  // study: the art alone, for finding controls
         // Current values over the art: a pointer on knobs, a bar on sliders.
         brush->SetColor(D2D1::ColorF(0.85f, 0.1f, 0.1f));
         int count = sizeof panel_pots / sizeof panel_pots[0];
@@ -224,7 +335,7 @@ struct PanelView::Impl {
             const PanelPot& p = panel_pots[i];
             float value = pot_value[i] / 255.f;
             if (p.slider) {
-                float y = (p.y + 52 - value * 104) * s;
+                float y = (p.y + 44 - value * 88) * s;  // the art's track is 88 units long
                 target->DrawLine(D2D1::Point2F((p.x - 12) * s, y), D2D1::Point2F((p.x + 12) * s, y), brush, std::max(1.5f, 4 * s));
             } else {
                 float angle = (-135 + value * 270) * 3.14159265f / 180;
@@ -301,6 +412,7 @@ struct PanelView::Impl {
         case WM_RBUTTONUP: self->scale_menu(lparam); return 0;
         case WM_COMMAND: {
             int percent = (int)LOWORD(wparam) - scale_command;
+            if (LOWORD(wparam) == shot_command) { if (const char* path = getenv("OB12_PANEL_SHOT")) self->save_image(path); return 0; }
             if (percent > 0 && percent <= 400 && self->width_request) self->width_request(PanelView::base_width * percent / 100);
             return 0;
         }
@@ -360,8 +472,8 @@ void PanelView::resize(int width, int height) {
     impl->height = height;
     if (!impl->window) return;
     SetWindowPos(impl->window, nullptr, 0, 0, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
-    if (impl->target) {
-        impl->target->Resize(D2D1::SizeU(width, height));
+    if (impl->hwnd_target) {
+        impl->hwnd_target->Resize(D2D1::SizeU(width, height));
         impl->render_art();
     }
     InvalidateRect(impl->window, nullptr, FALSE);
