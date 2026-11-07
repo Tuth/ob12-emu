@@ -1952,3 +1952,11 @@ For the 0.6 ms between the first and the second write the stage runs with the co
 the old coefficients; that drives it into the rail, and the click follows. Open: whether the real
 DSP sees these writes in the same order and spacing (the host interface timing), or the Slave on
 the unit writes them closer together. Nothing changed.
+
+Thor: with portamento off The Raver does not click. So the click is the glide stage.
+
+Slave side: the bytes 3A A2 AE 92 go to DASP1 through the generic sender FC29B9-FC29F1 (byte 7751 of
+8169 in `OB12_DSP_BYTE_LOG`), but the entry does not pass the D:29D6/D:29D8 path watched for
+Resonance; that queue is shared by all chips (its C03A/C03B/C03D entries at 19.005-19.014 belong to
+other chips). The routine that queues the glide start is not found yet. Next: watch the queue
+buffer itself (where FC29B7 reads @RW0) for the A2AE92 entry and its writer.
