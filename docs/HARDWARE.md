@@ -2011,3 +2011,11 @@ On the unit either the same race clicks at random, or the TMS57070 host interfac
 way that hides it (buffering a group and taking it in at once). The "TMS57070 basic info" document
 has no detail on the host interface. Not changed; a decision is open between staying firmware-true
 and modelling a take-in that applies a Slave burst together.
+
+Thor: with portamento on it clicks every time, legato or not, poly or mono; off, never. A non-legato
+note (3C released, 48 at 19 s) lands on DASP0 and shows the same writes for three stages:
+19.0144 C03A A2AE92, then 19.0148-19.0149 C01B 811041, C02B 811041, C03A FF3412, C03B 811041
+(C01A/C01B, C02A/C02B, C03A/C03B: three glide stages). Each has the race; any one losing its offset
+clicks, so with three of them nearly every note does. With portamento off these stages do not run.
+That the real unit does not click (as Thor reports for the program's behaviour) points to the chip
+taking a stage's A and B words in together.
