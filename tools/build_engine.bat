@@ -14,4 +14,5 @@ set FLAGS=/O2 /clang:-O3 /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS /w /Isrc\shi
 %CC% %FLAGS% tools\live_api_test.cpp build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj synchronization.lib /Febuild\live_api_test.exe
 %CC% %FLAGS% tools\pace_test.cpp build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj synchronization.lib winmm.lib /Febuild\pace_test.exe
 %CC% %FLAGS% tools\env_test.cpp build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj synchronization.lib /Febuild\env_test.exe
+%CC% %FLAGS% tools\seq_test.cpp build\ob12_engine.obj build\f2mc16.obj build\tms57070.obj synchronization.lib /Febuild\seq_test.exe
 echo BUILD_EXIT=%ERRORLEVEL%

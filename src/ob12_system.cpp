@@ -5,6 +5,7 @@
 //   OB12_DIRECT=n    send one note per channel 0..n-1 straight to the Slave, 1 s apart
 //   OB12_NOTE_CH=c   send one note on channel c straight to the Slave. It breaks running
 //                    status: the Master's next data bytes then read as notes. Use for study only
+//   OB12_MIDI_EVENTS=t:on:nn,t:off:nn  timed note on and off, note hex, channel 0, to the Master
 //   OB12_MIDI_NOTES=3C,40  send these notes on MIDI channel 0 to the Master, 0.5 s apart
 //   OB12_VOICE_TRACE=chip,first,last  print one sample of a chip for a PC range, hex
 //   OB12_MIDI=1      send the note to the Master's MIDI input instead
@@ -253,6 +254,27 @@ int main(int argc, char** argv) {
             if (*p == ',') p++;
         }
     }
+    struct TimedMidi { double at; u8 status, note; };
+    std::vector<TimedMidi> midi_events;  // OB12_MIDI_EVENTS=t:on:nn,t:off:nn,...  note hex, into the Master
+    size_t next_event = 0;
+    struct Poke { double at; int chip, address; int32_t value; };
+    std::vector<Poke> pokes;  // study: OB12_POKE=t:chip:cmem:value,... hex address and value, held from t on
+    if (const char* list = getenv("OB12_POKE")) {
+        double at; int chip, address, used; unsigned value;
+        while (sscanf(list, "%lf:%d:%x:%x%n", &at, &chip, &address, &value, &used) == 4) {
+            pokes.push_back({at, chip, address, (int32_t)(value << 8) >> 8});
+            list += used;
+            if (*list == ',') list++;
+        }
+    }
+    if (const char* list = getenv("OB12_MIDI_EVENTS")) {
+        double at; char kind[4]; int note, used;
+        while (sscanf(list, "%lf:%3[a-z]:%x%n", &at, kind, &note, &used) == 3) {
+            midi_events.push_back({at, (u8)(kind[1] == 'n' ? 0x90 : 0x80), (u8)note});
+            list += used;
+            if (*list == ',') list++;
+        }
+    }
     int32_t d04_peak[5] = {};
     // Study: send status, n, value straight to the Slave for n = 0..127.
     int seq_status = 0, seq_value = 0, seq_next = 0;
@@ -430,7 +452,7 @@ int main(int argc, char** argv) {
                 int32_t v[6];
                 for (int p = 0; p < 3; p++) for (int c = 0; c < 2; c++) v[p * 2 + c] = host[4].dsp->ax[p][c];
                 fwrite(v, 4, 6, port_log);
-                if (chip_log) { int32_t c[5]; for (int n = 0; n < 5; n++) c[n] = host[n].dsp->ax[1][0]; fwrite(c, 4, 5, chip_log); }
+                if (chip_log) { int32_t c[30]; for (int n = 0; n < 5; n++) for (int q = 0; q < 3; q++) for (int ch = 0; ch < 2; ch++) c[n * 6 + q * 2 + ch] = host[n].dsp->ax[q][ch]; fwrite(c, 4, 30, chip_log); }  // chip, AX1-3, L/R
                 if (cell_probe) { int32_t c[6]; int list[6] = {0x0b, 0x0f, 0xd0, 0xd1, 0x08, 0x17}; for (int i = 0; i < 6; i++) c[i] = logical_d(host[4].dsp, list[i]); fwrite(c, 4, 6, cell_probe); }
             }
             if (!live_on) {
@@ -479,6 +501,11 @@ int main(int argc, char** argv) {
             if (midi && midi_channel < 16 && now >= note_at + midi_channel * 0.5) {
                 m->midi_in({(u8)(0x90 | midi_channel), 0x3c, 0x64});
                 midi_channel++;
+            }
+            for (auto& p : pokes) if (now >= p.at) host[p.chip].dsp->cmem[p.address & 0x1ff] = p.value;
+            while (next_event < midi_events.size() && now >= midi_events[next_event].at) {
+                auto& ev = midi_events[next_event++];
+                m->midi_in({ev.status, ev.note, (u8)(ev.status == 0x90 ? 0x64 : 0x40)});
             }
             if (next_midi < midi_notes.size() && now >= note_at + next_midi * 0.5) {
                 m->midi_in({0x90, midi_notes[next_midi], 0x64});
@@ -668,7 +695,7 @@ int main(int argc, char** argv) {
         std::ofstream dump(name);
         char text[64];
         for (int n = 0; n < 5; n++) for (int a = 0; a < 512; a++) {
-            snprintf(text, sizeof text, "%d %03X %06X %06X\n", n, a, a < 256 ? logical_d(host[n].dsp, a) & 0xffffff : 0, host[n].dsp->cmem[a] & 0xffffff);
+            snprintf(text, sizeof text, "%d %03X %06X %06X %08X\n", n, a, a < 256 ? logical_d(host[n].dsp, a) & 0xffffff : 0, host[n].dsp->cmem[a] & 0xffffff, host[n].dsp->pmem[a]);  // chip, address, DMEM, CMEM, PMEM
             dump << text;
         }
     }

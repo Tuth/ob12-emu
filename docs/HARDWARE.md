@@ -1553,3 +1553,37 @@ The preset sustain is at the top. The attack still ends near 87% of top, below t
 in "PPG tick rate"; whether the real unit does that is not known. Not changed.
 
 Not checked: the filter envelope. Its attack ramp has no cell yet ("Filters Attack: not found").
+
+## A-004 Canada rings forever (measured, not fixed)
+
+Thor: on A-004 Canada a released note keeps sounding, like an endless release; once the pitch did
+not follow new notes either, which does not happen every time.
+
+Reproduced, `tools/seq_test` and `OB12_MIDI_EVENTS` (new, timed note on and off in `ob12_system`):
+note 3C on at 14 s, off at 15 s, 43 at 18-19 s. Encoder 2 then 1 detent from boot, display reads
+A-004 Canada (timbre slots 2 and 3, A-042 Mono Synth). Three detents at once gave A-005: the encoder
+model double steps on a fast turn, not looked into.
+
+Where the sound is (`OB12_CHIP_LOG`, now all ports of all chips, odd half frames):
+- The voice bus is right: DASP0-3 AX2 carry 528 Hz while the note is held, fall to about 0 after
+  note off, and carry 788 Hz for the next note. In this run the pitch did follow.
+- MOUT (DASP4 AX2) holds 524 Hz from the note on at 385000-465000 rms, about 8 times the voice,
+  for as long as the run lasts. So new notes are buried under the ring. That may be what sounded
+  like a pitch that does not follow; not proven, as Thor says that part comes and goes.
+- The Master sends the right bytes: 95 3C 64, 96 48 64, then 95 3C 00, 96 48 00 (channels 5, 6).
+
+The loop: DASP4 runs the same program in A-001 and A-004 (PMEM identical); 156 CMEM words differ.
+- 165 `4200212C` multiplies by C12C, the 43 at 166 `4348288A` reuses it for the other channel.
+- The Slave ramps C12C in 32 steps to its target: 3D6FD0 in A-001, 7FFFFF in A-004. So 1.0 is the
+  program's value, not an overflow seen here.
+- `OB12_POKE` (new) after note off at 16 s: C12C = 0 stops the ring at once; 3D6FD0 lets it die in
+  about 0.3 s, to 1/1000, so a loop of about 30 ms a pass. So C12C is a gain inside a recirculating
+  path, and with 1.0 the loop gain is 1.
+- Model options, release ratio MOUT 17-18 s over 14.3-14.9 s: now 1.41; `OB12_EARLY_2D` 1.30;
+  `OB12_BUS_WRAP` 1.41; `OB12_NO_NOISE` 1.47; `OB12_MACLO` 0.000; `OB12_EARLY_POINTER` 0.000 (16066
+  at 16-17 s); `OB12_EARLY_MODE` 1.005 at a tenth of the level; `OB12_NO_RELOAD` silences effects.
+
+Open: if the firmware means 1.0, the real loop holds a gain below 1 somewhere we hold 1, or C12C is
+not in the loop on the real chip. Candidates: what the 43 at 166 really multiplies by, the queued
+pointer load (secondaries 06, 08 sit on both 43s and the early pointer load also ends the ring).
+Not decided, nothing changed.

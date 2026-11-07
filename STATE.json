@@ -94,6 +94,8 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "A-004 Canada: DASP4 loop with C12C = 1.0 rings forever; find what holds the real loop below 1 (43 at 166, queued pointer load)",
+    "Encoder: three detents at once step four programs",
     "PR #3: secondary 2D order is a fifth finding, send only with approval",
     "Filter envelope: find its cells and check A, D, S, R like the amp; amp checked, no fault",
     "Amp attack ends near 87% of top, below the sustain; check against a real unit",
