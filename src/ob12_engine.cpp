@@ -147,6 +147,7 @@ struct Engine::Impl {
 
     mutable std::mutex lcd_lock;
     uint8_t lcd_copy[30 * 64] = {};
+    uint8_t led_copy[16] = {};
     bool lcd_ready = false;
     std::atomic<bool> ready{false};
     long ready_at = 0;  // half frame the Slave had answered
@@ -191,6 +192,7 @@ struct Engine::Impl {
             if (k % 3072 == 0) {
                 std::lock_guard<std::mutex> hold(lcd_lock);
                 lcd_ready = m->lcd.bitmap(lcd_copy);
+                memcpy(led_copy, m->led, sizeof led_copy);
             }
         }
         slice = k % 3 == 2 ? 166 : 167;  // 16 MHz: 500 cycles per three half frames
@@ -364,6 +366,11 @@ void Engine::turn(int detents) {
 }
 
 bool Engine::sounding_ready() const { return impl->ready.load(std::memory_order_relaxed); }
+
+void Engine::leds(uint8_t* latches) const {
+    std::lock_guard<std::mutex> hold(impl->lcd_lock);
+    memcpy(latches, impl->led_copy, sizeof impl->led_copy);
+}
 
 bool Engine::lcd(uint8_t* bitmap) const {
     std::lock_guard<std::mutex> hold(impl->lcd_lock);

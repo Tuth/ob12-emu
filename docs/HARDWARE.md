@@ -1793,3 +1793,24 @@ them. Now the moving parts come out of the static art and are drawn at the value
   marks stay only as a fallback where nothing was found. All 53 found.
 
 Not done: LEDs, the encoder, keys shown pressed.
+
+## LEDs (measured)
+
+The Master drives the LEDs neither through UART0 (0 bytes) nor by the CS2 data byte (always 0).
+F0F1D9 shifts each byte out on port 8, bit 5 data, bit 6 clock, LSB first, eight rising edges; the
+write to 68FF80+n then loads the shifted byte into latch n. Modelled in the Master (`led_shift`,
+`led[16]`), exposed as `Engine::leds`. `OB12_LED_LOG` logs each strobe with its byte.
+
+After boot on A-001: 69 82 44 14 40 00 08 02 48 22 00 40 18 00 00 00. Blinking with no key: latch 5
+bit 0 and latch 6 bit 7.
+
+Mapping by pressing each key with a lamp and diffing the latches (`seq_test` t:dump):
+Single 12.4, Layer 12.5, Split 12.6, Program 11.6, Timbre 11.5, System 11.4, Panel Scan 11.2, Morph
+Auto 10.6, Manual 10.5, Loc 1 10.3, Loc 2 10.2, Motion Rec 10.1, Overdrive 5.6, Chorus 5.5, Delay
+5.4, Reverb 5.3, Arp On 5.2, EQ Bypass 9.7. These 18 are in `panel_leds` and light on the panel;
+in play mode Single and Program are lit, as on the unit.
+
+Not mapped yet: the other lamps (Osc wave select, Sync, Mono, Portamento and others showed no
+clear bit in one press each), the small indicator LEDs (LP/BP/HP, routing, LFO waves, octave,
+arpeggio mode and range, and so on), and the two blinking bits. The 48 circles of 12 x 12 in the
+art are the key lamps; the indicators are smaller circles, not yet listed.

@@ -512,6 +512,19 @@ struct PanelView::Impl {
         if (getenv("OB12_PANEL_BARE")) { target->EndDraw(); return; }  // study: the art alone, for finding controls
         // Caps and knob faces move with their values; a red mark only where the art had none found.
         draw_moving(std::min(width / art_w, height / art_h));
+        // Lamps: lit from the Master's LED latches. A soft glow, then the lamp, then a highlight.
+        uint8_t latches[16];
+        engine.leds(latches);
+        for (const PanelLed& led : panel_leds) {
+            if (!(latches[led.latch] >> led.bit & 1)) continue;
+            D2D1_POINT_2F c = D2D1::Point2F(led.x * s, led.y * s);
+            brush->SetColor(D2D1::ColorF(1.f, 0.15f, 0.08f, 0.28f));
+            target->FillEllipse(D2D1::Ellipse(c, 9 * s, 9 * s), brush);
+            brush->SetColor(D2D1::ColorF(1.f, 0.16f, 0.1f));
+            target->FillEllipse(D2D1::Ellipse(c, 5.6f * s, 5.6f * s), brush);
+            brush->SetColor(D2D1::ColorF(1.f, 0.75f, 0.6f, 0.85f));
+            target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c.x - 1.6f * s, c.y - 1.8f * s), 1.8f * s, 1.4f * s), brush);
+        }
         brush->SetColor(D2D1::ColorF(0.85f, 0.1f, 0.1f));
         int count = sizeof panel_pots / sizeof panel_pots[0];
         for (int i = 0; i < count; i++) {

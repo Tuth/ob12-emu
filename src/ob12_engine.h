@@ -21,6 +21,8 @@ public:
     bool sounding_ready() const;                         // the Slave has reported in
     // 240 x 64, one bit per pixel, 30 bytes a row. False until the Master has set up the LCD.
     bool lcd(uint8_t* bitmap) const;
+    // The 16 LED latch bytes the Master last wrote (CS2, 68FF80-8F).
+    void leds(uint8_t* latches) const;
 
 private:
     struct Impl;

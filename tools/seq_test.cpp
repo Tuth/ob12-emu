@@ -1,7 +1,7 @@
 // A timed event list through the engine, MOUT to a WAV.
 // usage: seq_test <rom dir> <seconds> <out.wav> event...
 // events: t:on:nn  t:off:nn  (note hex, velocity 64)  t:enc:detents  t:pot:channel:mux:value(hex)
-//         t:key:bar:bit  (panel key down, up 80 ms later)
+//         t:key:bar:bit  (panel key down, up 80 ms later)  t:dump  (print time and the LED latches)
 #include "ob12_engine.h"
 #include <algorithm>
 #include <cstdio>
@@ -18,11 +18,12 @@ int main(int argc, char** argv) {
     std::vector<Event> events;
     for (int i = 4; i < argc; i++) {
         double t; char kind[8]; int a = 0, b = 0, c = 0;
-        if (sscanf(argv[i], "%lf:%7[a-z]:%x:%d:%x", &t, kind, &a, &b, &c) < 3) continue;
+        if (sscanf(argv[i], "%lf:%7[a-z]:%x:%d:%x", &t, kind, &a, &b, &c) < 2) continue;
         Event ev{(long)(t * 48000), 0, a, b, c};
         if (!strcmp(kind, "off")) ev.kind = 1;
         else if (!strcmp(kind, "enc")) { ev.kind = 2; sscanf(argv[i], "%lf:%7[a-z]:%d", &t, kind, &ev.a); }
         else if (!strcmp(kind, "pot")) { ev.kind = 3; sscanf(argv[i], "%lf:%7[a-z]:%d:%d:%x", &t, kind, &ev.a, &ev.b, &ev.c); }
+        else if (!strcmp(kind, "dump")) ev.kind = 6;
         else if (!strcmp(kind, "key")) {
             ev.kind = 4; sscanf(argv[i], "%lf:%7[a-z]:%d:%d", &t, kind, &ev.a, &ev.b);
             Event up = ev; up.kind = 5; up.frame += 48000 * 8 / 100;
@@ -41,11 +42,18 @@ int main(int argc, char** argv) {
             else if (ev.kind == 1) { uint8_t m[3] = {0x80, (uint8_t)ev.a, 0x40}; e.midi(m, 3); }
             else if (ev.kind == 2) e.turn(ev.a);
             else if (ev.kind == 3) e.set_pot(ev.a, ev.b, ev.c);
+            else if (ev.kind == 6) { uint8_t l[16]; e.leds(l); printf("leds %.2f", ev.frame / 48000.0); for (int j = 0; j < 16; j++) printf(" %02X", l[j]); printf("|"); }
             else e.key(ev.a, ev.b, ev.kind == 4);
         }
         int n = (int)std::min<long>(240, frames - done);
         e.run(audio.data() + done * 2, n);
         done += n;
+    }
+    if (getenv("SEQ_LEDS")) {  // the LED latches at the end, hex
+        uint8_t l[16];
+        e.leds(l);
+        for (int i = 0; i < 16; i++) printf("%02X ", l[i]);
+        printf("\n");
     }
     if (const char* path = getenv("SEQ_LCD")) {  // the display at the end, 240 x 64 PBM
         uint8_t bitmap[30 * 64];

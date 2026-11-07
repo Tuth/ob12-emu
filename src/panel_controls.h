@@ -64,3 +64,28 @@ static const PanelKey panel_keys[] = {
 
 static const float panel_dial_x = 1755, panel_dial_y = 380, panel_dial_r = 60;
 static const float panel_lcd_x0 = 1190, panel_lcd_y0 = 325, panel_lcd_x1 = 1578, panel_lcd_y1 = 433;
+
+// LEDs: the lamp in a key, at its circle in the art, lit when bit `bit` of LED latch `latch` is set.
+// The Master shifts each latch byte out on port 8 and strobes it at 68FF80+latch. Found by pressing
+// each key and reading the latches; only the ones measured without doubt are here.
+struct PanelLed { const char* name; float x, y; int latch, bit; };
+static const PanelLed panel_leds[] = {
+    {"Single", 1292, 567, 12, 4},
+    {"Layer", 1237, 567, 12, 5},
+    {"Split", 1185, 567, 12, 6},
+    {"Program", 1453, 567, 11, 6},
+    {"Timbre", 1505, 567, 11, 5},
+    {"System", 1560, 567, 11, 4},
+    {"Panel Scan", 1454, 608, 11, 2},
+    {"Morph Auto", 1881, 568, 10, 6},
+    {"Morph Manual", 1933, 568, 10, 5},
+    {"Loc 1", 1882, 609, 10, 3},
+    {"Loc 2", 1933, 609, 10, 2},
+    {"Motion Rec", 1986, 609, 10, 1},
+    {"Overdrive On", 517, 609, 5, 6},
+    {"Chorus On", 597, 609, 5, 5},
+    {"Delay On", 679, 609, 5, 4},
+    {"Reverb On", 758, 609, 5, 3},
+    {"Arp On", 865, 609, 5, 2},
+    {"EQ Bypass", 2362, 609, 9, 7},
+};

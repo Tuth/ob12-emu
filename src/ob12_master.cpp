@@ -199,6 +199,8 @@ public:
         }
         if (address == 0x68ff00) { lcd.write_data(data); return; }
         if (address == 0x68ff01) { lcd.command(data); return; }
+        if ((address & 0xfffff0) == 0x68ff80) led[address & 15] = led_shift;  // CS2 strobe: latch n takes the shifted byte
+        if ((address & 0xfffff0) == 0x68ff80 && led_log) fprintf(led_log, "%.4f %06X %02X %06X\n", cycles_total / 16e6, address, led_shift, pc);  // study: OB12_LED_LOG
         Stat& s = touch(ext, address & 0xfffff0);
         s.writes++;
         s.last = data;
@@ -231,6 +233,9 @@ public:
     // Test input: from this time on, every pot moves slowly and differently.
     double pot_sweep_from = 0;
     u16 pot_rest = 0x80;  // where pots sit; the firmware reads only the low byte, 8 bits
+    u8 led[16] = {};  // each LED latch, the byte as the firmware shifted it, bit 0 first
+    u8 led_shift = 0;
+    FILE* led_log = getenv("OB12_LED_LOG") ? fopen(getenv("OB12_LED_LOG"), "w") : nullptr;  // last byte written to each CS2 LED latch, 68FF80-8F
     double pot_clock = -1;  // sample time from the system, the CPU clock runs a little ahead of it
     struct KeyStep { double from, to; int row; u8 mask; };
     std::vector<KeyStep> key_steps;  // test input: a key held between two times
@@ -468,6 +473,11 @@ private:
         return io[address];
     }
     void io_write(u32 address, u8 data) {
+        // LED data is shifted out on port 8, bit 5 data, bit 6 clock, LSB first (F0F1D9); a write to
+        // 68FF80+n then loads the byte into latch n. Rising clock edges shift in the data bit.
+        if (address == 0x08) {
+            if ((data & 0x40) && !(io[0x08] & 0x40)) led_shift = (u8)((led_shift >> 1) | ((data & 0x20) ? 0x80 : 0));
+        }
         for (auto& t : timer) {
             if (address == (u32)t.base) {
                 bool trg = data & 1;
