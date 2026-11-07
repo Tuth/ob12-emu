@@ -1907,3 +1907,18 @@ DASP1 per sample (`OB12_CELL_LOG=1,0.995,1.05` with the note time at 18):
 Open: which words write D16, D1E, D20, D1F, whether those cells are meant to reach the rail, and
 how the voice output D45 uses them. `OB12_WATCH_D` lists the writer PCs of DMEM cells on DASP0;
 it needs a chip choice for DASP1.
+
+### The Raver click: the writers (measured)
+
+DASP1 traced one sample at 19.0170 and 19.0185 s (`OB12_TRACE_CHIP=1 OB12_TRACE4_ALL=1 OB12_CREADS=t`):
+- 01B `79023A40` writes D1E from the MAC (C03A FF3412); 01E `79023A40` writes D1F (C03C 476BE0);
+  021 `00023A00` writes D20 from the MAC (C03D C76BE0, C03E E00000; 01C reads C03B 811041).
+- The coefficients read as a second order filter on a control value: 476BE0 = 0.558, C76BE0 =
+  -0.442, 811041 = -0.992, E00000 = -0.25. D1E, D1F, D20 are its states, D20 its output.
+- D20 goes on to 02E-038 with C0B0-C0B3, the block the Slave writes in its note-start burst
+  (C0B1 049800 at 19.0170, 031800 at 19.0185).
+- D20: 7B1D1B at 19.0170, 7FFFED/7FFFF7 at 19.0185, at the rail from then on.
+
+Open: the input of this filter at a voice start, and whether D20 is meant to reach the rail; a
+different overflow rule on the real chip (unsigned, or wrap where the model saturates) is the
+candidate. Nothing changed.
