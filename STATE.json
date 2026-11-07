@@ -78,7 +78,8 @@
       "FC0400 is reload timer 1; glide step modelled, Timeless LD follows the keys",
       "Primary 43 multiplies DMEM by the held C word; real reload timer default; MOUT stereo with effects, detuned saw, 12 notes without clipping",
       "Secondary 2D after the primary: LFO phases wrap, AX1 moves, Filter Frequency works in late sustain (A-003, FF over 00 1.45, was 1.00)",
-      "Editor size menu 50 to 200%, width kept per user; display font 5 x 7 dot matrix"
+      "Editor size menu 50 to 200%, width kept per user; display font 5 x 7 dot matrix",
+      "CPU rise explained: machine state, not code; current code 13% faster than 81dfb3b on equal terms"
     ],
     "blocked": []
   },
@@ -94,7 +95,6 @@
   "audit_queue": [
     "PR #3: secondary 2D order is a fifth finding, send only with approval",
     "KBD Track direction: FF darkens note 48, check against the panel",
-    "CPU: pace 5.43 cores, was 3.29; cause not found, not 2D order or font",
     "Bus sum saturation: resonance sweep still wraps without it, check against the real mechanism",
     "AOUT left constant 113",
     "CPU: faster step() is what lowers the floor",

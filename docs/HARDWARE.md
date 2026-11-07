@@ -1454,8 +1454,43 @@ display reads "OB Sweep", which was "08 Sweep" before. 7E and 7F are drawn as ar
 character LCDs; the firmware prints 7E after NEXT. That is inferred. The original font is still
 unknown, and characters above 7F still have no glyphs.
 
-CPU, unexplained: pace test now 5.43 cores, 0 ring empties, engine 1.8 x real time. The last round
+**Retracted** by "The CPU rise was the machine" below. CPU, unexplained: pace test now 5.43 cores, 0 ring empties, engine 1.8 x real time. The last round
 gave 3.29 cores and 2.35 x. Not the 2D order and not the font: A/B with the same binary gave 1.75 and
 1.71, and 1.73 with the old font. Not other load: the machine was idle and the core alone still runs
 20 ns a step. A second PGO run gave the same. VSTHost was open during the earlier figure, which may
 matter or not; untested.
+
+## The CPU rise was the machine, not the code (measured)
+
+Retracts "CPU, unexplained" above. Nothing in the code made it slower. The machine runs in two
+states, and the 5.43 cores came from the slow one.
+
+Same flags, old commit 81dfb3b (where 3.29 cores was measured) beside the current code, run in turn:
+
+| Build | Offline, quiet machine | Pace test, quiet machine |
+|---|---|---|
+| Plain, old / new | 1.14 x / 1.15 x | 6.9 cores both |
+| Fresh profile guided, old | 2.32-2.42 x | 3.39-3.49 cores |
+| Fresh profile guided, new | 2.67-2.72 x | 3.06-3.28 cores |
+| `build/` as the tools build it | 2.71-2.85 x, 16 runs in a row | 2.91 cores |
+
+So the current code is about 13% faster than 81dfb3b, not slower. Output MD5 d620434501e83a6b6bb4591adfd94d3f
+in every build.
+
+The slow state: the same binaries drop to 1.7-1.9 x and 5.1-5.5 cores, all at once, and come back
+all at once, once in the middle of a series. Seen the first time while VSTHost was running OB12 at
+3.13 cores; VSTHost gained about 390 s of CPU between two of my checks later on, so it was playing
+in between. Not caught in the act the second time: a 3 s sampler over 16 fast runs showed nothing
+else above 0.15 cores and the clock reading stayed at 3701 MHz. So VSTHost is the likely cause and
+not proven for every slow run.
+
+Side finding, profile counters: training runs five DSP threads on shared counters, which lose
+25-35% of the increments (step 3.2-3.7G against 4.9G exact with `-fprofile-update=atomic`) and
+differ run to run. It does not matter for speed: atomic profiles gave 2.61-2.69 x in the quiet state,
+the same as the lossy ones. Not changed in `build_pgo.bat`, as atomic counters gave no gain and make
+training slower, 900 s against 750 s.
+
+How to measure from now on: nothing else playing (VSTHost closed or idle), several runs in turn, and
+the offline figure next to the pace figure; a pace result alone does not tell machine from code.
+
+In a real host: VSTHost ran one OB12 at 3.13 cores, near the pace figure.
