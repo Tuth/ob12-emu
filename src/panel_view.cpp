@@ -5,6 +5,7 @@
 #include <d2d1.h>
 #include <wincodec.h>
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cwchar>
 #include <cmath>
@@ -40,6 +41,7 @@ struct Moving {
     float cx = 0, cy = 0;   // knob centre
     float rest = 0;         // knob: the art's pointer angle, degrees clockwise from 12 o'clock
     float travel = 0;       // slider: art units from value 0 to full
+    float lo = -135, hi = 135;  // knob: angles of its end marks, degrees clockwise from 12 o'clock
     bool found = false;
 };
 
@@ -182,6 +184,20 @@ struct PanelView::Impl {
                     // the pointer's dark fill only
                     if (run.mode == 2 && run.argb == 0xff6d6e71) for (size_t j = 0; j + 1 < run.points.size(); j += 2) { sx += run.points[j] - m.cx; sy += run.points[j + 1] - m.cy; sn++; }
                 }
+                // The scale's end marks: the small dark fills just outside the knob, below its centre.
+                for (int r = 0; r < (int)runs.size(); r++) {
+                    const Run& run = runs[r];
+                    if (run.mode != 2 || run.argb != 0xff231f20 || run.points.empty()) continue;
+                    float x0, y0, x1, y1;
+                    box(run, x0, y0, x1, y1);
+                    if ((x1 - x0) / k > 9 || (y1 - y0) / k > 9) continue;
+                    float dx = (x0 + x1) / 2 - m.cx, dy = (y0 + y1) / 2 - m.cy, d = std::hypot(dx, dy);
+                    if (d < radius * 1.1f || d > radius * 1.9f || dy <= 0) continue;
+                    float a = atan2f(dx, -dy) * 180 / 3.14159265f;
+                    if (a < -120) m.lo = std::max(m.lo == -135 ? -180.f : m.lo, a);
+                    if (a > 120) m.hi = std::min(m.hi == 135 ? 180.f : m.hi, a);
+                }
+                if (m.lo <= -180 || m.hi >= 180) { m.lo = -135; m.hi = 135; }
                 if (!sn) for (int r : picked) if (runs[r].mode == 2)  // no dark pointer: any face fill
                     for (size_t j = 0; j + 1 < runs[r].points.size(); j += 2) { sx += runs[r].points[j] - m.cx; sy += runs[r].points[j + 1] - m.cy; sn++; }
                 if (sn) m.rest = (float)(atan2(sx, -sy) * 180 / 3.14159265);
@@ -207,6 +223,7 @@ struct PanelView::Impl {
             }
             std::sort(m.runs.begin(), m.runs.end());
             m.found = true;
+            if (getenv("OB12_PANEL_DEBUG")) fprintf(stderr, "%-18s runs %3zu centre %.1f %.1f rest %.0f range %.0f..%.0f\n", p.name, m.runs.size(), m.cx / k, m.cy / k, m.rest, m.lo, m.hi);
         }
     }
 
@@ -214,13 +231,28 @@ struct PanelView::Impl {
     void draw_moving(float scale) {
         int count = sizeof panel_pots / sizeof panel_pots[0];
         ID2D1SolidColorBrush* paint = brush;
+        // The art's rails stop where the resting cap hides them; carry each down to as far below the
+        // bottom tick as the rail reaches above the top one, with its slot. Frame units, then scaled.
+        const float f = scale * art_w / panel_frame_w;
+        for (int i = 0; i < count; i++) {
+            const PanelPot& p = panel_pots[i];
+            if (!p.slider || !moving[i].found) continue;
+            float top = p.y + 43.9f, bottom = p.y + 81;
+            paint->SetColor(D2D1::ColorF(0x231f20));
+            target->FillRectangle(D2D1::RectF((p.x - 0.9f) * f, (p.y + 43) * f, (p.x + 0.8f) * f, (bottom - 2.1f) * f), paint);
+            paint->SetColor(D2D1::ColorF(0x000202));
+            float w = std::max(0.5f, 1.01f * f);
+            target->DrawLine(D2D1::Point2F((p.x - 3.7f) * f, top * f), D2D1::Point2F((p.x - 3.7f) * f, bottom * f), paint, w);
+            target->DrawLine(D2D1::Point2F((p.x + 3.7f) * f, top * f), D2D1::Point2F((p.x + 3.7f) * f, bottom * f), paint, w);
+            target->DrawLine(D2D1::Point2F((p.x - 3.7f) * f, bottom * f), D2D1::Point2F((p.x + 3.7f) * f, bottom * f), paint, w);
+        }
         for (int i = 0; i < count; i++) {
             const Moving& m = moving[i];
             if (!m.found) continue;
             float value = pot_value[i] / 255.f;
             D2D1::Matrix3x2F place = panel_pots[i].slider
                 ? D2D1::Matrix3x2F::Translation(0, -value * m.travel)
-                : D2D1::Matrix3x2F::Rotation(-135 + value * 270 - m.rest, D2D1::Point2F(m.cx, m.cy));
+                : D2D1::Matrix3x2F::Rotation(m.lo + value * (m.hi - m.lo) - m.rest, D2D1::Point2F(m.cx, m.cy));
             target->SetTransform(place * D2D1::Matrix3x2F::Scale(scale, scale));
             size_t depth = 0;
             for (int r : m.runs) {
@@ -428,6 +460,8 @@ struct PanelView::Impl {
 
     // The panel drawn into a WIC bitmap and saved as PNG, off screen: for checking it by eye.
     bool save_image(const char* path) {
+        if (const char* v = getenv("OB12_PANEL_SHOT_VALUE"))  // study: every pot at this value, 0-255
+            for (int& value : pot_value) value = atoi(v);
         drop_target();
         IWICImagingFactory* wic = nullptr;
         IWICBitmap* bitmap = nullptr;
