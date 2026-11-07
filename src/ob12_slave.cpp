@@ -90,9 +90,9 @@ public:
     void write_byte(u32 address, u8 data) override {
         address &= 0xffffff;
         if (address < 0x100) { Stat& s = touch(iostat, address); s.writes++; s.last = data; io_write(address, data); return; }
-        if (address < 0x500) { if (address >= watch_lo && address < watch_hi) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data); internal[address] = data; return; }
+        if (address < 0x500) { if (address >= watch_lo && address < watch_hi && cycles_total >= watch_from) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data); internal[address] = data; return; }
         if (address >= 0xfc0000) { Stat& s = touch(flashw, address & 0xffff00); s.writes++; s.last = data; return; }
-        if (address >= watch_lo && address < watch_hi) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data);
+        if (address >= watch_lo && address < watch_hi && cycles_total >= watch_from) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data);
         if (address >= 0xe00000 && address < 0xf00000) { if (trace_file) fprintf(trace_file, "W %06X %02X\n", address, data); ram[address & 0xffff] = data; return; }
         if (address == 0x68ff80) { dsp_byte(data); return; }
         Stat& s = touch(ext, address & 0xfffff0);
@@ -100,7 +100,8 @@ public:
         s.last = data;
     }
 
-    u32 watch_lo = 0, watch_hi = 0;  // study: print writes in this range
+    u32 watch_lo = 0, watch_hi = 0;
+    s64 watch_from = 0;  // study: watch only from this cycle on (OB12_SLAVE_WATCH_FROM, seconds)  // study: print writes in this range
     FILE* trace_file = nullptr;  // study: PCs and RAM accesses
     bool lean = false;  // skip the per instruction statistics
     void tick(int cycles) {

@@ -1960,3 +1960,17 @@ Slave side: the bytes 3A A2 AE 92 go to DASP1 through the generic sender FC29B9-
 Resonance; that queue is shared by all chips (its C03A/C03B/C03D entries at 19.005-19.014 belong to
 other chips). The routine that queues the glide start is not found yet. Next: watch the queue
 buffer itself (where FC29B7 reads @RW0) for the A2AE92 entry and its writer.
+
+### The Raver: where A2AE92 comes from (measured, reading inferred)
+
+`OB12_SLAVE_WATCH=100,f00000 OB12_SLAVE_WATCH_FROM=19.0` (new: watch from a time on): the routine at
+FC2BAF-FC2C2B builds A2AE92 on the stack (EFFFA7-EFFFAA) at 19.0159-19.0160 and sends it at once at
+19.0163 through the sender code (FC29D5-FC29F1), not through the queue.
+
+Reading, inferred: 3C to 48 is one octave, and A2AE92 = -0.72 has that size, so this is the glide's
+start offset. C03A then seems to serve twice: for a moment as the offset that loads the stage's
+state, then as the small rate constant (FF3412 from 19.0169). With the offset in place for one sample
+the state would be -0.72 and fine; in the model it stays 0.6 ms, about 29 samples, and the stage adds
+it to itself each sample into the rail. Open: how long the offset lives in C03A on the unit (the
+Slave's time to the next write, the DSP host interface latency), and the stage's exact equations.
+Not fixed.

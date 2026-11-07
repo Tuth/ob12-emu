@@ -348,6 +348,7 @@ int main(int argc, char** argv) {
         }
     }
     if (const char* text = getenv("OB12_SLAVE_WATCH")) sscanf(text, "%x,%x", &s->watch_lo, &s->watch_hi);
+    if (const char* text = getenv("OB12_SLAVE_WATCH_FROM")) s->watch_from = (s64)(atof(text) * 16e6);
     bool full_reload = getenv("OB12_NO_RELOAD") == nullptr;  // timer 1 starts the effects; off leaves glide only
     int slave_tick = getenv("OB12_SLAVE_TICK") ? atoi(getenv("OB12_SLAVE_TICK")) : 96;
     std::vector<int> cell_pick;  // study: OB12_CELL_PICK=10,42 logs only these DMEM cells
