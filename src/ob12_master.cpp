@@ -265,7 +265,9 @@ public:
         double now = pot_clock >= 0 ? pot_clock : cycles_total / 16e6;
         int channel = (adc_channel - 1) & 7;
         int mux = io[0x05] & 7;  // POTA[2:0], sheet 02/15
-        u16 stepped = pot_rest;
+        // The mod wheel (ADC 0, mux 6) rests at its bottom, not mid way like a panel pot: half a wheel
+        // put A-015's amp LFO on from power on. The pitch wheel (mux 4) rests in the middle.
+        u16 stepped = channel == 0 && mux == 6 ? 0 : pot_rest;
         if (pot_live[channel][mux] >= 0) return (u16)pot_live[channel][mux];
         for (auto& step : pot_steps) if (now >= step.at && step.channel == channel && step.mux == mux) stepped = step.value;
         if (pot_sweep_from <= 0 || now < pot_sweep_from) return stepped;
