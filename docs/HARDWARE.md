@@ -1773,3 +1773,23 @@ Checking by eye: the panel saves itself as PNG off screen (hidden command 1999, 
 was tried first and dropped: it grabbed whatever window was on top.
 
 Not done: LEDs, and knobs drawn turning rather than a pointer over the art.
+
+### Moving caps and knob faces from the art (measured)
+
+Thor: the red marks sit apart from the art's own pointer and cap. The art draws every knob pointer
+at -59 degrees (10 o'clock) and every slider cap at the bottom, so a mark at the value never met
+them. Now the moving parts come out of the static art and are drawn at the value:
+
+- Slider cap: the runs under the track within +-14 units and from 36 to 92 units below the track
+  centre (gradient strips, white handle line, outline, its clip): 350 or so runs per slider. Value 0
+  is the art's rest (handle on the bottom tick); full is 88 units up.
+- Knob face: the body is the grey (BCBEC0) fill, its box centre the knob centre (this replaces the
+  stack midpoint, 3 to 4 units off). The face marks are the runs whose every point lies on the body,
+  minus the knurled ring. The pointer angle is the centroid of its dark (6D6E71) fill: -59 degrees.
+  Osc2 Range has no body fill; there the knurled ring gives the centre and the light fill the angle.
+- Clip pairs go with a part only if everything between push and pop moves. Taking pairs by net
+  depth broke the art (an outer pop went missing and every later knob was clipped away).
+- Drawn each paint over the cached art with a translate or a rotation about the centre; the red
+  marks stay only as a fallback where nothing was found. All 53 found.
+
+Not done: LEDs, the encoder, keys shown pressed.

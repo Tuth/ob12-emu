@@ -30,6 +30,17 @@ struct Run {
     std::vector<uint8_t> kinds;
     std::vector<float> points;
     ID2D1PathGeometry* geometry = nullptr;
+    bool moving = false;  // drawn per frame by its control, not in the static art
+};
+
+// The parts of a control that move with its value: a slider's cap, a knob's face marks.
+// Found in the vector art at load. Units are the art's own.
+struct Moving {
+    std::vector<int> runs;
+    float cx = 0, cy = 0;   // knob centre
+    float rest = 0;         // knob: the art's pointer angle, degrees clockwise from 12 o'clock
+    float travel = 0;       // slider: art units from value 0 to full
+    bool found = false;
 };
 
 constexpr int scale_command = 1000;  // menu id is this plus the percentage
@@ -60,6 +71,8 @@ struct PanelView::Impl {
     int width = 0, height = 0;
 
     int pot_value[sizeof panel_pots / sizeof panel_pots[0]];
+    Moving moving[sizeof panel_pots / sizeof panel_pots[0]];
+    std::vector<ID2D1Layer*> live_layers;
     int drag_pot = -1, drag_start_y = 0, drag_start_value = 0, down_key = -1;
     bool drag_dial = false;
     int dial_y = 0;
@@ -94,6 +107,138 @@ struct PanelView::Impl {
                 for (int j = 0; j < n * 2; j++) r.points.push_back(f32());
             }
         }
+    }
+
+    void box(const Run& r, float& x0, float& y0, float& x1, float& y1) const {
+        x0 = y0 = 1e9f; x1 = y1 = -1e9f;
+        for (size_t i = 0; i + 1 < r.points.size(); i += 2) {
+            x0 = std::min(x0, r.points[i]); x1 = std::max(x1, r.points[i]);
+            y0 = std::min(y0, r.points[i + 1]); y1 = std::max(y1, r.points[i + 1]);
+        }
+    }
+
+    void find_moving() {
+        const float k = art_w / panel_frame_w;  // frame units to art units
+        int count = sizeof panel_pots / sizeof panel_pots[0];
+        for (int i = 0; i < count; i++) {
+            const PanelPot& p = panel_pots[i];
+            Moving& m = moving[i];
+            float px = p.x * k, py = p.y * k;
+            int first = -1, last = -1;
+            std::vector<int> picked;
+            if (p.slider) {
+                // The cap: below the track, within the cap's width, not the ticks left of the track.
+                for (int r = 0; r < (int)runs.size(); r++) {
+                    if (runs[r].mode >= 4 || runs[r].points.empty()) continue;
+                    float x0, y0, x1, y1;
+                    box(runs[r], x0, y0, x1, y1);
+                    if (x0 >= px - 14 * k && x1 <= px + 14 * k && y0 >= py + 36 * k && y1 <= py + 92 * k) picked.push_back(r);
+                }
+                m.travel = 88 * k;
+            } else {
+                // The body: a grey fill whose box centre is the knob centre.
+                int body = -1;
+                float best = 1e9f;
+                for (int r = 0; r < (int)runs.size(); r++) {
+                    const Run& run = runs[r];
+                    if (run.mode != 2 || run.argb != 0xffbcbec0) continue;
+                    float x0, y0, x1, y1;
+                    box(run, x0, y0, x1, y1);
+                    float w = (x1 - x0) / k, h = (y1 - y0) / k;
+                    if (w < 40 || w > 60 || h < 30 || h > 60) continue;
+                    float d = std::hypot((x0 + x1) / 2 - px, (y0 + y1) / 2 - py);
+                    if (d < best) { best = d; body = r; m.cx = (x0 + x1) / 2; m.cy = (y0 + y1) / 2; }
+                }
+                if (body < 0 || best > 25 * k) {
+                    // Some knobs (Osc2 Range) have no body fill: take the centre from the knurled ring.
+                    body = -1; best = 1e9f;
+                    for (int r = 0; r < (int)runs.size(); r++) {
+                        const Run& run = runs[r];
+                        int figures = (int)std::count(run.kinds.begin(), run.kinds.end(), (uint8_t)0);
+                        if (run.mode != 3 || figures < 60 || figures > 72) continue;
+                        float x0, y0, x1, y1;
+                        box(run, x0, y0, x1, y1);
+                        if ((y1 - y0) / k < 30 || (y1 - y0) / k > 42) continue;
+                        float d = std::hypot((x0 + x1) / 2 - px, (y0 + y1) / 2 - py);
+                        if (d < best) { best = d; body = r; m.cx = (x0 + x1) / 2; m.cy = (y0 + y1) / 2; }
+                    }
+                    if (body < 0 || best > 25 * k) continue;
+                }
+                float bx0, by0, bx1, by1;
+                box(runs[body], bx0, by0, bx1, by1);
+                float radius = (by1 - by0) / 2;  // the height: Bezier handles widen the box sideways
+                double sx = 0, sy = 0;  // the face marks' fill centroid points where the knob points
+                long sn = 0;
+                for (int r = 0; r < (int)runs.size(); r++) {
+                    const Run& run = runs[r];
+                    if (r == body || run.mode >= 4 || run.points.empty() || (run.argb == 0xffbcbec0 && runs[body].mode == 2)) continue;
+                    int figures = (int)std::count(run.kinds.begin(), run.kinds.end(), (uint8_t)0);
+                    if (figures > 8) continue;  // the knurled ring
+                    bool inside = true;  // every point of the shape on the knob's face
+                    for (size_t j = 0; j + 1 < run.points.size() && inside; j += 2)
+                        if (std::hypot(run.points[j] - m.cx, run.points[j + 1] - m.cy) > radius * 1.02f) inside = false;
+                    if (!inside) continue;
+                    picked.push_back(r);
+                    // the pointer's dark fill only
+                    if (run.mode == 2 && run.argb == 0xff6d6e71) for (size_t j = 0; j + 1 < run.points.size(); j += 2) { sx += run.points[j] - m.cx; sy += run.points[j + 1] - m.cy; sn++; }
+                }
+                if (!sn) for (int r : picked) if (runs[r].mode == 2)  // no dark pointer: any face fill
+                    for (size_t j = 0; j + 1 < runs[r].points.size(); j += 2) { sx += runs[r].points[j] - m.cx; sy += runs[r].points[j + 1] - m.cy; sn++; }
+                if (sn) m.rest = (float)(atan2(sx, -sy) * 180 / 3.14159265);
+            }
+            if (picked.empty()) continue;
+            first = picked.front(); last = picked.back();
+            // Clip pairs nested between them belong to the part too; an unmatched push or pop belongs to
+            // an outer clip and stays in the static art, so its layers stay balanced.
+            for (int r : picked) { runs[r].moving = true; m.runs.push_back(r); }
+            std::vector<int> open;
+            for (int r = first; r <= last; r++) {
+                if (runs[r].mode == 4) open.push_back(r);
+                else if (runs[r].mode == 5 && !open.empty()) {
+                    int push = open.back();
+                    open.pop_back();
+                    bool whole = true;  // only a clip whose whole content moves goes with it
+                    for (int q = push + 1; q < r; q++) if (!runs[q].moving && runs[q].mode < 4) whole = false;
+                    if (!whole) continue;
+                    runs[push].moving = runs[r].moving = true;
+                    m.runs.push_back(push);
+                    m.runs.push_back(r);
+                }
+            }
+            std::sort(m.runs.begin(), m.runs.end());
+            m.found = true;
+        }
+    }
+
+    // A control's moving parts at its value, drawn over the static art.
+    void draw_moving(float scale) {
+        int count = sizeof panel_pots / sizeof panel_pots[0];
+        ID2D1SolidColorBrush* paint = brush;
+        for (int i = 0; i < count; i++) {
+            const Moving& m = moving[i];
+            if (!m.found) continue;
+            float value = pot_value[i] / 255.f;
+            D2D1::Matrix3x2F place = panel_pots[i].slider
+                ? D2D1::Matrix3x2F::Translation(0, -value * m.travel)
+                : D2D1::Matrix3x2F::Rotation(-135 + value * 270 - m.rest, D2D1::Point2F(m.cx, m.cy));
+            target->SetTransform(place * D2D1::Matrix3x2F::Scale(scale, scale));
+            size_t depth = 0;
+            for (int r : m.runs) {
+                const Run& run = runs[r];
+                if (run.mode == 4) {
+                    if (depth == live_layers.size()) { ID2D1Layer* l = nullptr; target->CreateLayer(&l); live_layers.push_back(l); }
+                    target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), run.geometry), live_layers[depth++]);
+                } else if (run.mode == 5) {
+                    if (depth) { target->PopLayer(); depth--; }
+                } else {
+                    paint->SetColor(color(run.argb));
+                    if (run.mode == 3) target->DrawGeometry(run.geometry, paint, run.width);
+                    else target->FillGeometry(run.geometry, paint);
+                }
+            }
+            while (depth) { target->PopLayer(); depth--; }
+        }
+        target->SetTransform(D2D1::Matrix3x2F::Identity());
     }
 
     void build_geometry() {
@@ -148,6 +293,7 @@ struct PanelView::Impl {
         std::vector<ID2D1Layer*> clips;
         size_t depth = 0;
         for (auto& r : runs) {
+            if (r.moving) continue;
             if (r.mode == 4) {
                 if (depth == clips.size()) {
                     ID2D1Layer* l = nullptr;
@@ -185,6 +331,8 @@ struct PanelView::Impl {
     }
 
     void drop_target() {
+        for (auto* l : live_layers) l->Release();
+        live_layers.clear();
         release(art); release(lcd); release(brush); release(target);
         hwnd_target = nullptr;
     }
@@ -328,11 +476,13 @@ struct PanelView::Impl {
         draw_lcd(s);
 
         if (getenv("OB12_PANEL_BARE")) { target->EndDraw(); return; }  // study: the art alone, for finding controls
-        // Current values over the art: a pointer on knobs, a bar on sliders.
+        // Caps and knob faces move with their values; a red mark only where the art had none found.
+        draw_moving(std::min(width / art_w, height / art_h));
         brush->SetColor(D2D1::ColorF(0.85f, 0.1f, 0.1f));
         int count = sizeof panel_pots / sizeof panel_pots[0];
         for (int i = 0; i < count; i++) {
             const PanelPot& p = panel_pots[i];
+            if (moving[i].found) continue;
             float value = pot_value[i] / 255.f;
             if (p.slider) {
                 float y = (p.y + 44 - value * 88) * s;  // the art's track is 88 units long
@@ -425,6 +575,7 @@ struct PanelView::Impl {
 PanelView::PanelView(Engine& engine, const std::string& art_file) : impl(new Impl(engine)) {
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &impl->factory);
     impl->load(art_file);
+    impl->find_moving();
     impl->build_geometry();
 }
 
