@@ -1386,3 +1386,8 @@ Timeless LD by encoder still follows the keys: lines 133, 260, 520 after glide.
 
 Open: AOUT left still constant 113. Timer rate is inferred. No recording of a real OB-12 has been
 compared, so "fits Fat Pad" is a reading of the spectrum, not a match.
+
+Correction for PR #3: drafted in `docs/PR3-CORRECTION.md`, not sent. Public emulator with the fix,
+against the own core with `OB12_CMP_PR=1`: 81.92M steps identical, loaded and live CMEM, failures 0.
+Control, the sent patch against the same core: mismatches at 0DD, 1BF, 0E8, 5 failures. Program 4
+with live CMEM did not differ in that control at 2000 frames, so that run does not exercise 43.

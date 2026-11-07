@@ -95,13 +95,13 @@ int main(int argc, char** argv) {
         tms::Options options;
         if (getenv("OB12_CMP_PR")) {  // the options a patched public emulator should match
             options.late_mode_change = options.queued_pointer_load = options.compare_3e = true;
-            options.maclo_multiply = options.maclo_unsigned = options.maclo_shift = true;
+            options.reuse_coefficient = true;
         }
         if (getenv("OB12_BENCH_ALL")) {  // the set the instrument runs; only for timing, run with 0 frames
             options.audio_port_writes = options.true_dmem_ring = options.lock_delay = true;
             options.divide_1fc = options.noise_generator = true;
             options.late_mode_change = options.queued_pointer_load = options.compare_3e = true;
-            options.maclo_multiply = options.maclo_unsigned = options.maclo_shift = true;
+            options.reuse_coefficient = true;
         }
         auto* b = new tms::Core(options);
         a->reset();
