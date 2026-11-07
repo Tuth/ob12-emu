@@ -1844,3 +1844,25 @@ Osc Common, BUT5 Effects Level/Param, BUT6 Keyboard Mono, BUT7 LFO1 Wave Select.
 On/Off, Arpeggio Hold, Portamento, Legato, Unison, Phrase Rec. BUTB[3]: LFO2 Depth Select, Keyboard
 OCT-, OSC Shift, OCT+, LFO2 Wave Select. BUTB[4]: Arpeggio Mode, Arpeggio On/Off, Reverb, Delay,
 Overdrive, Chorus, Arpeggio Range. Tap tempos on BTIME[0], BTIME[1].
+
+### All 89 LEDs mapped from the schematic and layouts (measured against the latches)
+
+Chain: latch n (strobe 68FF80+n) = LED[n] on the sheets; Q(k) = bit (7-k); Q to ON per chip from
+p36 (Panel A, LED[1..6]) and p40 (Panel B, LED[7..12]); ON to DL on the same sheets; DL to its
+place from the PCB layouts p46 (Panel A, 192521) and p47 (Panel B, 192522), by the key P number it
+sits beside or the row it is in. The art has 46 lamps (12 x 12 circles in keys) and 43 indicators
+(A7A9AC fills of 6 x 8 beside labels); every one has a bit. Table in `src/panel_controls.h`.
+
+Checks against the earlier key presses, all agree: Overdrive/Chorus/Delay/Reverb/Arp On = latch 5
+bits 6..2; Program/Timbre/System/Panel Scan = latch 11 bits 6, 5, 4, 2; Split/Layer/Single = latch
+12 bits 6, 5, 4; Auto/Manual/Enable and Loc 1/Loc 2/Rec = latch 10 bits 6..1; EQ Bypass = 9.7.
+The two bits that blink alone are the tap tempo lamps: 5.0 Arpeggio (DL15), 6.7 Phrase (DL16).
+At rest on A-001 Part 1 lights with Single, LFO1 wave 2, Filter 1 and 2 HP, Routing Serial and so on.
+
+Order within a group is from the layout where the DLs sit in a row (LFO1 waves DL1-4 left to
+right, LFO2 waves DL17, 18, 24, 29 top down, filters DL8-10 and DL11-13 left to right, LP BP HP).
+The filter wiring is not monotonic (ONT8 DL9, ONT9 DL8), so Filter 1 LP is bit 2 and BP bit 1.
+Not checked on a unit. Panel C (wheels, keyboard sense) is not drawn on the panel art.
+
+Font note (Thor): the large program name on the display is Handel Gothic; file
+E:/dl/handelgotdlig-regular.zip. To use when the display font is reworked.

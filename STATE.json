@@ -84,7 +84,8 @@
       "A-004 Canada ring fixed: DASP4 XMEM 128K words (board DRAM) and XMEM read pipeline; effect buffers no longer overlap; reference 12b99e29",
       "Panel positions from the vector art (Amp sliders were one track off); LCD drawn as an even dot matrix",
       "Panel: slider caps and knob faces taken out of the art and drawn at their values",
-      "LEDs: Master shifts latch bytes on port 8 (bit 5 data, bit 6 clock), strobes 68FF80+n; 18 lamps mapped and drawn"
+      "LEDs: Master shifts latch bytes on port 8 (bit 5 data, bit 6 clock), strobes 68FF80+n; 18 lamps mapped and drawn",
+      "All 89 panel LEDs mapped (46 lamps, 43 indicators) from the service manual sheets and layouts"
     ],
     "blocked": []
   },
@@ -98,7 +99,8 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "LEDs: 18 lamps mapped and lit; map the rest of the lamps, the small indicator LEDs and the two blinking bits (5.0, 6.7)",
+    "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
+    "Display font: large program name is Handel Gothic (E:/dl/handelgotdlig-regular.zip, Thor); small font nearly right",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",
     "Delay: measure echo time against TIME and repeats against FEEDBACK on more programs",
     "Encoder: three detents at once step four programs",

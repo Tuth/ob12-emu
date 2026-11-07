@@ -518,12 +518,13 @@ struct PanelView::Impl {
         for (const PanelLed& led : panel_leds) {
             if (!(latches[led.latch] >> led.bit & 1)) continue;
             D2D1_POINT_2F c = D2D1::Point2F(led.x * s, led.y * s);
+            float r = led.lamp ? 5.6f : 3.1f;  // a key's lamp, or a small indicator beside a label
             brush->SetColor(D2D1::ColorF(1.f, 0.15f, 0.08f, 0.28f));
-            target->FillEllipse(D2D1::Ellipse(c, 9 * s, 9 * s), brush);
+            target->FillEllipse(D2D1::Ellipse(c, r * 1.6f * s, r * 1.6f * s), brush);
             brush->SetColor(D2D1::ColorF(1.f, 0.16f, 0.1f));
-            target->FillEllipse(D2D1::Ellipse(c, 5.6f * s, 5.6f * s), brush);
+            target->FillEllipse(D2D1::Ellipse(c, r * s, r * s), brush);
             brush->SetColor(D2D1::ColorF(1.f, 0.75f, 0.6f, 0.85f));
-            target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c.x - 1.6f * s, c.y - 1.8f * s), 1.8f * s, 1.4f * s), brush);
+            target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c.x - r * 0.29f * s, c.y - r * 0.32f * s), r * 0.32f * s, r * 0.25f * s), brush);
         }
         brush->SetColor(D2D1::ColorF(0.85f, 0.1f, 0.1f));
         int count = sizeof panel_pots / sizeof panel_pots[0];
