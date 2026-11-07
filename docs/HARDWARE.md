@@ -2146,3 +2146,15 @@ The shifts and the overflow handling follow the TMS57002 as MAME has it (output 
 >>8; clamp only in the saturating mode), and the gains come from coefficients the firmware writes.
 So no model error is found in this stage: the loud fuzz may be what the firmware does. Settling it
 needs a recording of a unit with A-015 and a clean program at the same settings.
+
+### Against a unit: the dry programs are about 13 dB too quiet, not the overdrive too loud (measured)
+
+Thor's recording of a unit (a demo video's audio, programs from A-001 upwards, A-015 from 6:53),
+1 s rms in dBFS: 0:00-6:50 median -19.3, A-015 (6:53-7:10) -15.4, whole video median -19.8. So on
+the unit A-015 is about 4 dB above the rest. Ours: A-015 -14.9 dBFS (rms 5858), median of A-001 to
+A-032 -32.4 (rms 786): 17 dB apart. The overdrive sits where the unit's does in absolute level
+(if the video's level is near the unit's), and the clean programs are about 13 dB low. That fits the
+DASP4 trace: the clipper's output does not depend on its input, so a dry path too low by some factor
+leaves the overdrive untouched. 12 dB is a factor of 4, one output shift step (<<2); where the
+voices or the bus could lose it is the next thing to look at. Caveats: the video is mixed (peaks
+near 0 dBFS, likely limited), and the takes play chords and sweeps, not one note.
