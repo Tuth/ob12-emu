@@ -2133,7 +2133,16 @@ address of the D cell after the word, and of both accumulators) on A-015, overdr
 - after the tone filters (123-131) and C0E8 = 0.40 (133): wet 0.133, ten times the dry 0.014.
 Master Volume does not explain it: its maximum (`F0 7F 30 04 01 00 7F F7`) writes C0CB = 03513E, the
 power on value, and C0CB is applied at 0F8, before the overdrive. So in the firmware's design the dry
-path runs at about -32 dB there and the fuzz runs at full scale. Whether that matches a unit depends
-on the drive stage: it is a clip made from the rounding mode (CR1 bits 9-11, `round_bits` table
-{0,24,28,30,32,32,28,30}, partly inferred) and a multiply by 2^-23. The next step is to model that
-stage word by word against the TMS57002 rounding definition before changing anything.
+path runs at about -32 dB there and the fuzz runs at full scale. Retracted: "a clip made from the rounding mode". Decoded word by word, the drive stage uses no
+rounding mode:
+- 117 `42295A2C`: C0D6 x D37 into MAC 0, secondary 29 sets the output shift to x4 (CR1 12-13 = 1).
+- 118 `2BC02132`: primary AND (28-2B are AND), acc1 = C132 (800000) AND MAC 1 output: its sign.
+- 119 `59402133`: MAC 1 += unsigned acc1 x C133 (000001): the sign as a tiny term.
+- 11A, 11B: C0D7 x D36, C0D8 x D2F into MAC 0. 11D, 11E: the same sign trick for MAC 0.
+- 11F `0028B000`: accumulate shift <<4 (CR1 14-15 = 2). 120: C0D9 x D35 into MAC 1.
+- 121 `5169A123`: MAC 1 += acc1 x C123 (0), secondary 29 sets the output shift to x16.
+- 122 `00283000`: accumulate shift back to 0.
+The shifts and the overflow handling follow the TMS57002 as MAME has it (output shift none, <<2, <<4,
+>>8; clamp only in the saturating mode), and the gains come from coefficients the firmware writes.
+So no model error is found in this stage: the loud fuzz may be what the firmware does. Settling it
+needs a recording of a unit with A-015 and a clean program at the same settings.
