@@ -65,28 +65,6 @@ struct Host {
     std::vector<u8> buffer;
     bool running = false, start_pending = false;
 
-    // A coefficient word written right after the one below it (A then A+1, as the Slave writes a glide
-    // stage's rate and pole) takes effect together with it, so no DSP sample sees one without the
-    // other. A held word waits at most one half frame. Same as ob12_system; see "The Raver" in
-    // docs/HARDWARE.md.
-    bool pair_words = true;
-    int held_address = -1, held_age = 0;
-    int32_t held_value = 0;
-
-    void word(int address, int32_t value) {
-        if (!pair_words) { dsp->cmem[address] = value; return; }
-        if (held_address >= 0) {
-            int first = held_address;
-            held_address = -1;
-            dsp->cmem[first] = held_value;
-            if (address == first + 1) { dsp->cmem[address] = value; return; }
-        }
-        held_address = address; held_value = value; held_age = 0;
-    }
-    void half_frame() {
-        if (held_address >= 0 && ++held_age >= 2) { dsp->cmem[held_address] = held_value; held_address = -1; }
-    }
-
     void deselect() { if (state == Update) { state = Idle; buffer.clear(); } }
     void byte(u8 data) {
         switch (state) {
@@ -124,7 +102,7 @@ struct Host {
             buffer.push_back(data);
             if (buffer.size() == 5) {
                 int address = (buffer[0] << 8 | buffer[1]) & 0x1ff;
-                word(address, (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8);
+                dsp->cmem[address] = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
                 buffer.clear();
             }
             break;
@@ -258,7 +236,6 @@ struct Engine::Impl {
                 }
             }
             if (h.start_pending && part == 0) { h.start_pending = false; h.running = true; }
-            h.half_frame();
             if (h.running) for (int i = 0; i < 256; i++) d->step();
             memcpy(snap[now][part][n], d->ax, sizeof d->ax);
         }

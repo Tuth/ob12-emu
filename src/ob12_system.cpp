@@ -31,7 +31,6 @@
 //   OB12_LIVE_MS=n   buffer length in ms, default 10; OB12_LIVE_BUFFERS=n, default 6
 //   OB12_LIVE_MIDI=d  take notes from MIDI input device d; OB12_LIVE_MIDI=list prints them
 //   OB12_NO_RELOAD=1  no reload timer 1: dry sound, glide only
-//   OB12_HOST_SINGLE=1  host words take effect one by one, not a stage's A, A+1 pair together
 //   OB12_XREAD_CANCEL=1  a new XMEM read cancels the pending one (old model)
 //   OB12_XMEM_CR3=1  DASP4 XMEM size from CR3 (32K words) instead of the board's 128K
 //   OB12_EARLY_2D=1  secondary 2D before the primary: all LFOs stand still
@@ -86,32 +85,6 @@ struct Host {
     int chip = 0;
     const double* clock = nullptr;
 
-    // A coefficient word written right after the one below it (A then A+1, as the Slave writes a glide
-    // stage's rate and pole) takes effect together with it, so no DSP sample sees one without the
-    // other. A held word waits at most one half frame. See "The Raver" in docs/HARDWARE.md.
-    bool pair_words = true;
-    int held_address = -1, held_age = 0;
-    int32_t held_value = 0;
-
-    void commit(int address, int32_t value) {
-        dsp->cmem[address] = value;
-        updates++;
-        if (log) fprintf(log, "%.4f W %d C%03X %06X\n", *clock, chip, address, value & 0xffffff);
-    }
-    void word(int address, int32_t value) {
-        if (!pair_words) { commit(address, value); return; }
-        if (held_address >= 0) {
-            int first = held_address;
-            held_address = -1;
-            commit(first, held_value);
-            if (address == first + 1) { commit(address, value); return; }
-        }
-        held_address = address; held_value = value; held_age = 0;
-    }
-    void half_frame() {
-        if (held_address >= 0 && ++held_age >= 2) { int first = held_address; held_address = -1; commit(first, held_value); }
-    }
-
     void deselect() { if (state == Update) { state = Idle; buffer.clear(); } }
     void byte(u8 data) {
         switch (state) {
@@ -151,7 +124,9 @@ struct Host {
             buffer.push_back(data);
             if (buffer.size() == 5) {
                 int address = (buffer[0] << 8 | buffer[1]) & 0x1ff;
-                word(address, (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8);
+                dsp->cmem[address] = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
+                updates++;
+                if (log) fprintf(log, "%.4f W %d C%03X %06X\n", *clock, chip, address, dsp->cmem[address] & 0xffffff);
                 buffer.clear();
             }
             break;
@@ -246,7 +221,6 @@ int main(int argc, char** argv) {
     tms::Options options4 = options;
     if (!getenv("OB12_XMEM_CR3")) options4.xmem_words = 0x20000;
     for (int n = 0; n < 5; n++) host[n].dsp = new tms::Core(n == 4 ? options4 : options);
-    if (getenv("OB12_HOST_SINGLE")) for (auto& h : host) h.pair_words = false;  // each word on its own, the old model
     double clock = 0;
     FILE* host_log = getenv("OB12_HOST_LOG") ? fopen(getenv("OB12_HOST_LOG"), "w") : nullptr;
     FILE* port_log = getenv("OB12_PORT_LOG") ? fopen("build/ports.raw", "wb") : nullptr;
@@ -440,7 +414,6 @@ int main(int argc, char** argv) {
                     while (dsp_gate.go.load(std::memory_order_acquire) == seen) { if (stop_workers) return; _mm_pause(); }
                     seen++;
                     long long t0 = __rdtsc();
-                    host[n].half_frame();
                     if (host[n].running) for (int i = 0; i < 256; i++) host[n].dsp->step();
                     chip_tsc[n] += __rdtsc() - t0;
                     dsp_gate.done();
@@ -660,7 +633,6 @@ int main(int argc, char** argv) {
                     watch_value = h.dsp->cmem[watch];
                     watch_log++;
                 }
-                h.half_frame();
                 if (h.running) for (int i = 0; i < 256; i++) {
                     // study: one whole sample of DASP4, from PC 0 after t. OB12_TRACE4_ALL=1 prints every
                     // word with the D cell after it ran and the XMEM read address; else multiplies only.

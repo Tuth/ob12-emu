@@ -2019,20 +2019,3 @@ note (3C released, 48 at 19 s) lands on DASP0 and shows the same writes for thre
 clicks, so with three of them nearly every note does. With portamento off these stages do not run.
 That the real unit does not click (as Thor reports for the program's behaviour) points to the chip
 taking a stage's A and B words in together.
-
-### Fix: a stage's A and A+1 words take effect together (measured, inferred)
-
-Host words now pass a one word holding slot per chip (engine and `ob12_system` alike): a word
-followed next by the word at its address + 1 goes into CMEM together with it; otherwise it goes in
-when the next word comes or after one half frame at most. `OB12_HOST_SINGLE=1` gives the old model,
-which reproduces the old reference 12b99e29 exactly.
-
-The Raver, legato 3C to 48 at 19 s, DASP1 D1F: single 19.0164 -0.729, 19.0170 -0.006 (offset lost);
-paired -0.729, -0.729, -0.730, -0.731, ... (kept, smooth). Voice bus, largest one sample jump 12-30
-ms after the change: single 0.091, paired 0.029, the same note later 0.012; at 20.5 s, which did not
-lose its offset before, 0.019 and 0.017. A rough burst count over 16 note starts (8 legato, 8 not)
-moved only from 11 to 10, but that count also takes normal attacks; the cell trace is the measure.
-
-New reference e17ac3f1f8822f3a3386242129067c0f, engine and `ob12_system` identical: the change
-reaches every program, since coefficient pairs anywhere now land together, a half frame later at
-most. Inferred, not checked on a unit: the real host interface may do this another way.
