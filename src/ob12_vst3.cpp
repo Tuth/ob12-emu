@@ -21,7 +21,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdarg>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -129,10 +131,24 @@ struct Instrument {
 };
 
 class Plugin;
+static FILE* midi_log();
+// Diagnostic: the plug-in and editor life cycle, into the same opt-in log.
+static void trace(const char* format, ...) {
+    FILE* f = midi_log();
+    if (!f) return;
+    va_list args;
+    va_start(args, format);
+    vfprintf(f, format, args);
+    va_end(args);
+    fputc(10, f);
+    fflush(f);
+}
 
 // Diagnostic: what the host sends, the first 2000 lines, in %LOCALAPPDATA%\OB12\midi_log.txt.
 // Written only when that folder holds a file named midi_log.on.
 static FILE* midi_log() {
+    static std::mutex lock;
+    std::lock_guard<std::mutex> hold(lock);
     static FILE* f = nullptr;
     static bool tried = false;
     if (!tried) {
@@ -144,7 +160,8 @@ static FILE* midi_log() {
         }
     }
     static int lines = 0;
-    if (f && ++lines > 2000) { fclose(f); f = nullptr; }
+    // Past the limit the file stays open (another thread may hold it) but takes no more.
+    if (f && ++lines > 20000) return nullptr;
     return f;
 }
 
@@ -185,10 +202,10 @@ public:
         return kNoInterface;
     }
     uint32 PLUGIN_API addRef() override { return ++refs; }
-    uint32 PLUGIN_API release() override { uint32 n = --refs; if (!n) delete this; return n; }
+    uint32 PLUGIN_API release() override { uint32 n = --refs; trace("editor %p release -> %u", this, n); if (!n) delete this; return n; }
     tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override { return !strcmp(type, kPlatformTypeHWND) ? kResultTrue : kResultFalse; }
-    tresult PLUGIN_API attached(void* parent, FIDString) override { return view.attach(parent) ? kResultOk : kResultFalse; }
-    tresult PLUGIN_API removed() override { view.detach(); return kResultOk; }
+    tresult PLUGIN_API attached(void* parent, FIDString) override { trace("editor %p attached parent %p", this, parent); return view.attach(parent) ? kResultOk : kResultFalse; }
+    tresult PLUGIN_API removed() override { trace("editor %p removed", this); view.detach(); return kResultOk; }
     tresult PLUGIN_API onWheel(float) override { return kResultFalse; }
     tresult PLUGIN_API onKeyDown(char16, int16, int16) override { return kResultFalse; }
     tresult PLUGIN_API onKeyUp(char16, int16, int16) override { return kResultFalse; }
@@ -278,10 +295,15 @@ public:
         return kNoInterface;
     }
     uint32 PLUGIN_API addRef() override { return ++refs; }
-    uint32 PLUGIN_API release() override { uint32 n = --refs; if (!n) delete this; return n; }
+    uint32 PLUGIN_API release() override { uint32 n = --refs; if (!n) { trace("plugin %p deleted", this); delete this; } return n; }
 
-    tresult PLUGIN_API initialize(FUnknown*) override { return kResultOk; }
-    tresult PLUGIN_API terminate() override { instrument.reset(); return kResultOk; }
+    tresult PLUGIN_API initialize(FUnknown*) override { trace("plugin %p initialize", this); return kResultOk; }
+    tresult PLUGIN_API terminate() override {
+        trace("plugin %p terminate", this);
+        std::lock_guard<std::mutex> hold(instrument_lock);
+        instrument.reset();
+        return kResultOk;
+    }
 
     tresult PLUGIN_API getControllerClassId(TUID) override { return kNotImplemented; }
     tresult PLUGIN_API setIoMode(IoMode) override { return kNotImplemented; }
@@ -303,6 +325,7 @@ public:
     tresult PLUGIN_API getRoutingInfo(RoutingInfo&, RoutingInfo&) override { return kNotImplemented; }
     tresult PLUGIN_API activateBus(MediaType type, BusDirection dir, int32 index, TBool) override { return index == 0 && getBusCount(type, dir) ? kResultOk : kInvalidArgument; }
     tresult PLUGIN_API setActive(TBool state) override {
+        trace("plugin %p setActive %d", this, (int)state);
         if (state) ensure();  // a plug-in scan never activates, so it never boots the machine
         return kResultOk;
     }
@@ -403,6 +426,7 @@ public:
             if (FILE* f = midi_log()) {
                 for (auto& m : list) {
                     if (m.raw.empty()) { fprintf(f, "midi %02X %02X %02X\n", m.bytes[0], m.bytes[1], m.count > 2 ? m.bytes[2] : 0); continue; }
+                    if (m.raw.size() == 1 && m.raw[0] >= 0xf8) continue;  // clock and sensing would flood it
                     fprintf(f, "data");
                     for (size_t j = 0; j < m.raw.size() && j < 16; j++) fprintf(f, " %02X", m.raw[j]);
                     fprintf(f, m.raw.size() > 16 ? " ... (%zu)\n" : "\n", m.raw.size());
@@ -426,7 +450,9 @@ public:
         return kResultOk;
     }
 
+    // setActive and createView may come on different threads; one machine only.
     Instrument* ensure() {
+        std::lock_guard<std::mutex> hold(instrument_lock);
         if (!instrument) {
             auto* fresh = new Instrument;
             if (fresh->start()) instrument.reset(fresh);
@@ -439,6 +465,7 @@ private:
     std::atomic<uint32> refs{1};
     Facet facet{*this};
     std::unique_ptr<Instrument> instrument;
+    std::mutex instrument_lock;
     double rate = 48000;
 };
 
@@ -448,15 +475,19 @@ Editor::Editor(Plugin& p, Engine& engine) : owner(p), view(engine, rom_folder() 
     size.bottom = (int)std::lround(size.right / view.aspect());
     view.on_width_request([this](int width) { request_width(width); });
 }
-Editor::~Editor() { view.detach(); static_cast<IComponent&>(owner).release(); }
+Editor::~Editor() {
+    trace("editor %p deleted", this); view.detach(); static_cast<IComponent&>(owner).release(); }
 
 tresult PLUGIN_API Facet::queryInterface(const TUID iid, void** obj) { return static_cast<IComponent&>(plugin).queryInterface(iid, obj); }
 uint32 PLUGIN_API Facet::addRef() { return static_cast<IComponent&>(plugin).addRef(); }
 uint32 PLUGIN_API Facet::release() { return static_cast<IComponent&>(plugin).release(); }
 IPlugView* PLUGIN_API Facet::createView(FIDString name) {
+    trace("createView %s", name ? name : "(null)");
     if (strcmp(name, ViewType::kEditor)) return nullptr;
     Instrument* inst = plugin.ensure();
-    return inst ? new Editor(plugin, *inst->engine) : nullptr;
+    Editor* editor = inst ? new Editor(plugin, *inst->engine) : nullptr;
+    trace("createView -> editor %p", editor);
+    return editor;
 }
 
 class Factory final : public IPluginFactory2 {
