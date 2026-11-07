@@ -406,7 +406,7 @@ int main(int argc, char** argv) {
     // study: OB12_PC_RMS=chip,from,to (seconds): per program address, the rms of the D cell each
     // instruction addresses, after it ran, and of both accumulators. Printed at the end.
     int pcr_chip = -1; double pcr_from = 0, pcr_to = 0;
-    static double pcr_d[512], pcr_a0[512], pcr_a1[512]; static long pcr_n[512];
+    static double pcr_d[512], pcr_a0[512], pcr_a1[512], pcr_ax[512]; static long pcr_n[512];
     if (const char* t = getenv("OB12_PC_RMS")) sscanf(t, "%d,%lf,%lf", &pcr_chip, &pcr_from, &pcr_to);
     FILE* cell_log = nullptr;  // per sample: DMEM 256 and CMEM 512 words of one chip
     double cell_from = 0, cell_to = 0;
@@ -689,6 +689,8 @@ int main(int argc, char** argv) {
                         auto norm = [](int32_t v) { return (double)(((int64_t)v << 40) >> 40) / 8388608.0; };
                         double d = norm(h.dsp->dmem[pcr_cell]), a0 = norm(h.dsp->acc[0]), a1 = norm(h.dsp->acc[1]);
                         pcr_d[pc] += d * d; pcr_a0[pc] += a0 * a0; pcr_a1[pc] += a1 * a1; pcr_n[pc]++;
+                        uint32_t w = h.dsp->pmem[pc], sop = (w >> 16) & 0x3f;
+                        if ((w >> 24) < 0x80 && sop >= 0x18 && sop <= 0x1a) { double x = norm(h.dsp->ax[sop - 0x18][(w >> 15) & 1]); pcr_ax[pc] += x * x; }
                     }
                     if (trace_w) printf(" -> D %06X A %06X %06X XR %05X xrd %06X\n", h.dsp->dmem[trace_d] & 0xffffff, h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->study_xread(), h.dsp->xrd & 0xffffff);
                     if (creads_on && n == trace_chip && pc == 511) { creads_on = false; creads_done = true; }
@@ -819,6 +821,6 @@ int main(int argc, char** argv) {
     m->save_hot("build/hot.txt");
     m->save_ram("build/ram.bin");
     if (pcr_chip >= 0) for (int i = 0; i < 512; i++) if (pcr_n[i])
-        printf("pcrms %03X %08X D %.4f A0 %.4f A1 %.4f\n", i, host[pcr_chip].dsp->pmem[i], sqrt(pcr_d[i] / pcr_n[i]), sqrt(pcr_a0[i] / pcr_n[i]), sqrt(pcr_a1[i] / pcr_n[i]));
+        printf("pcrms %03X %08X D %.4f A0 %.4f A1 %.4f AX %.4f\n", i, host[pcr_chip].dsp->pmem[i], sqrt(pcr_d[i] / pcr_n[i]), sqrt(pcr_a0[i] / pcr_n[i]), sqrt(pcr_a1[i] / pcr_n[i]), sqrt(pcr_ax[i] / pcr_n[i]));
     return 0;
 }

@@ -2158,3 +2158,11 @@ DASP4 trace: the clipper's output does not depend on its input, so a dry path to
 leaves the overdrive untouched. 12 dB is a factor of 4, one output shift step (<<2); where the
 voices or the bus could lose it is the next thing to look at. Caveats: the video is mixed (peaks
 near 0 dBFS, likely limited), and the takes play chords and sweeps, not one note.
+
+Follow up, with chords (C2 C3 E3 G3, programs A-001 to A-016, engine): clean median -28.4 dBFS,
+A-015 -13.4, 15 dB apart; the video has about 4. So the single note test did not cause the gap.
+DASP4 passes the clean bus at about unity (its port 0 input at 103, 105: rms 0.024-0.026; MOUT about
+the same), so the level is set before it, on the voice chips: on DASP0 a voice runs near 0.4-0.95
+inside and the bus cell it adds into (A13B2139 at 1A0) holds 0.024. `OB12_PC_RMS` now also prints the
+rms of an AX port word written at that address. Next: follow one sounding voice from its oscillator
+to its bus add and find which word scales it by about 1/4 too much.
