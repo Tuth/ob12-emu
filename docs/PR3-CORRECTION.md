@@ -1,8 +1,10 @@
 # Draft: correction to PR #3, finding 4
 
-Status: draft, not sent. Nothing goes upstream without Thor's approval.
+Status: sent with Thor's approval, 2026-11-07: https://github.com/Prehistoricman/TMS57070/pull/3#issuecomment-6700756737, commit d1531ba on the PR branch,
+finding 4 replaced in the description. The "Result with all four" section there still gives
+numbers from the old model.
 
-Would be sent as: one commit on `Tuth/TMS57070` branch `ob12-findings`
+Sent as: one commit on `Tuth/TMS57070` branch `ob12-findings`
 (`F:\Claude\OB-12-pr\ob12-fix-43.patch`), this comment on
 https://github.com/Prehistoricman/TMS57070/pull/3, and the finding 4 section of the PR description
 replaced by the short text at the end.

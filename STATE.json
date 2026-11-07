@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Effects run by default, right channel alive: primary 43 reuses the last C; PR #3 finding 4 contradicted, correction awaits approval",
+    "phase": "Effects run by default, right channel alive: primary 43 reuses the last C; PR #3 finding 4 corrected upstream",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -90,7 +90,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "Correct PR #3 finding 4 upstream, only with explicit approval",
+    "PR #3 description: Result section still has old model numbers, update only with approval",
     "Bus sum saturation: resonance sweep still wraps without it, check against the real mechanism",
     "AOUT left constant 113",
     "CPU: faster step() is what lowers the floor",
