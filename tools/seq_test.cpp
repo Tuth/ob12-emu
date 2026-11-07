@@ -11,7 +11,7 @@
 #include <fstream>
 #include <vector>
 
-struct Event { long frame; int kind, a, b, c; uint8_t bytes[3]; int count; };  // kind 0 on, 1 off, 2 encoder, 3 pot, 4 key down, 5 key up
+struct Event { long frame; int kind, a, b, c; uint8_t bytes[256]; int count; };  // kind 0 on, 1 off, 2 encoder, 3 pot, 4 key down, 5 key up
 
 int main(int argc, char** argv) {
     Engine e(argv[1]);
@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
             ev.kind = 7;
             const char* hex = strchr(strchr(argv[i], ':') + 1, ':') + 1;
             ev.count = 0;
-            while (ev.count < 3 && hex[0] && hex[1]) { unsigned v; sscanf(hex, "%2x", &v); ev.bytes[ev.count++] = (uint8_t)v; hex += 2; }
+            while (ev.count < 256 && hex[0] && hex[1]) { unsigned v; sscanf(hex, "%2x", &v); ev.bytes[ev.count++] = (uint8_t)v; hex += 2; }
         }
         else if (!strcmp(kind, "key")) {
             ev.kind = 4; sscanf(argv[i], "%lf:%7[a-z]:%d:%d", &t, kind, &ev.a, &ev.b);
