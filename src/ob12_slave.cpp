@@ -78,6 +78,7 @@ public:
 
     u8 read_byte(u32 address) override {
         address &= 0xffffff;
+        if (byte_log && ((pc >= 0xfc29b0 && pc < 0xfc29f8) || pc == 0xfd1791)) fprintf(byte_log, "read %06X at %06X\n", address, pc);  // study: where the DSP sender reads
         if (address < 0x100) { Stat& s = touch(iostat, address); s.reads++; return io_read(address); }
         if (address < 0x500) return internal[address];
         if (address >= 0xfc0000) return flash[address - 0xfc0000];
@@ -89,7 +90,7 @@ public:
     void write_byte(u32 address, u8 data) override {
         address &= 0xffffff;
         if (address < 0x100) { Stat& s = touch(iostat, address); s.writes++; s.last = data; io_write(address, data); return; }
-        if (address < 0x500) { internal[address] = data; return; }
+        if (address < 0x500) { if (address >= watch_lo && address < watch_hi) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data); internal[address] = data; return; }
         if (address >= 0xfc0000) { Stat& s = touch(flashw, address & 0xffff00); s.writes++; s.last = data; return; }
         if (address >= watch_lo && address < watch_hi) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data);
         if (address >= 0xe00000 && address < 0xf00000) { if (trace_file) fprintf(trace_file, "W %06X %02X\n", address, data); ram[address & 0xffff] = data; return; }
@@ -244,6 +245,7 @@ private:
         for (int chip = 0; chip < 5; chip++)
             if (selected & (1 << chip)) dsp_stream[chip].push_back(data);
         if (!selected) unselected_bytes++;
+        if (byte_log) fprintf(byte_log, "%06X %02X %02X\n", pc, selected, data);  // study: OB12_DSP_BYTE_LOG
         if (on_dsp_byte) on_dsp_byte(selected, data);
     }
 
@@ -315,6 +317,7 @@ public:
     Uart uart[3];
     s64 timebase = 0;
     u32 pc = 0;
+    FILE* byte_log = nullptr;  // study: Slave PC of each DSP host byte
     u32 trail[16] = {};
     int trail_at = 0;
     std::unordered_map<u32, long> hot;

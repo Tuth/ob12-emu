@@ -235,6 +235,7 @@ int main(int argc, char** argv) {
     auto host_byte = [&](u8 selected, u8 data) {
         for (int chip = 0; chip < 5; chip++) if (selected & (1 << chip)) host[chip].byte(data);
     };
+    if (const char* path = getenv("OB12_DSP_BYTE_LOG")) s->byte_log = fopen(path, "w");  // study: Slave PC per DSP byte
     s->on_dsp_byte = [&](u8 selected, u8 data) {
         if (hold_bytes) held.push_back({selected, data}); else host_byte(selected, data);
     };

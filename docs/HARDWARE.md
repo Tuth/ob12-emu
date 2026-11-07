@@ -1723,3 +1723,25 @@ resonance does not depend on the cutoff, and at reso 00 the cutoff does not chan
 The damping step decodes as the firmware means it. What holds a lossless section at a moderate
 level on the real chip is not known: saturation or truncation in the integrators, or the second
 section. Open, nothing changed.
+
+### The zero damping at Resonance 127 is in the firmware's own table (measured)
+
+C12E per Resonance value (Master byte A0 3F v, with a note held): 0E 178408, 1F 102D50, 2F 0B6049,
+51 056234, 61 036436, 69 020000, 72 011AA6, 76 00D90E, 7A 00A6AF, 7C 009211, 7E 008000, 7F 000000.
+A smooth exponential, 10.5 steps an octave, then 0 at the last step; continuing the curve would give
+about 7800.
+
+Followed back through the Slave (`OB12_DSP_BYTE_LOG`: Slave PC per DSP byte and the sender's reads;
+`OB12_SLAVE_WATCH` now covers internal RAM too):
+- FC29B9-FC29F1 sends the bytes from EF525A; FC3150 queues it from D:29D8; FD1798 stores D:29D8 from
+  the voice block at +0x120 (EFBE7E); FD6FD2 writes that when Resonance changes, from
+  `long[FCD910 + 4 x resonance]`.
+- The table at FCD910 in 12dsp111: entry 00 20000000 ... 7E 00800000, 7F 00000000; entry 80 is
+  other data. So 0 at 127 is the firmware's choice, and the emulation carries it out.
+
+Measured with that: A-001, min cutoff, one note, voice bus rms: 7E -28.3 dBFS, 7F -13.8; 7F with
+C12E poked to 7800 -27.9, the level of 7E. So the last step alone is 14 of the 24 dB.
+
+Thor recalls the real unit at Resonance max, min cutoff, near the plain level. If so, the real chip
+holds a lossless section down by some means the emulation lacks, since the firmware does not.
+Not settled; nothing changed.
