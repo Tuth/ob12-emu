@@ -1618,3 +1618,22 @@ Not decided, nothing changed.
 
 Next: follow the delay line through XMEM (the 39 reads and writes, their timing) and the right
 channel words 165-186, and check that repeats follow FEEDBACK and TIME. Nothing changed in the model.
+
+### Canada, the delay line traced (measured, not fixed)
+
+`OB12_CREADS=t OB12_TRACE4_ALL=1` prints one whole DASP4 sample from PC 0: word, C and D operand,
+the D cell after, ACC, the XMEM read address and XRD.
+
+- The delay reads come in pairs, n and n+1 (C09C 006963/006964, C09D 010324/010325): an
+  interpolated, modulated tap. TIME sets the read offsets, C12E (L, 006963) and C12F (R, 010324).
+  Writes go through a CMEM table walked by CA1: C0EE, C0F0, C0F7, C0FB are XMEM write addresses,
+  the cells between them the coefficients (C0F4 FEEDBACK, C0F5/C0F6 and C0F9/C0FA HI-DAMP).
+- The core keeps one XMEM read in flight, and a new read cancels it: 167 starts 04BAF, 16C starts
+  04BB0 before it lands, so 16E takes a stale XRD (FF1C22, read at 150). Same at 171/176.
+- Study option `xread_flush` (`OB12_XREAD_FLUSH=1`): a new read first lands the pending one in XRD.
+  Canada after note off: 10731, 659, 231 at 15.1, 15.5, 16 s, the ring is gone. But a short note
+  still gives no echo at hundreds of ms in either model, and FEEDBACK 0.25 or 0.88 gives the same
+  envelope. So the delay returns no signal of its own; the flush alone is not the fix and stays off.
+
+Next: why the taps never meet the writes: XMEM size and the 12-bit DRAM bus (3 x 44C256, 256K x 12),
+`xoff` stepping, and where the read pairs land.

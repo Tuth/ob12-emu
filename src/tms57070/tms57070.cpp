@@ -316,6 +316,10 @@ void Core::primary(uint32_t word) {
         } else {
             static const int with_word[4] = {21, 12, 9, 0};
             static const int without[4] = {15, 9, 0, 6};
+            if (options.xread_flush && xmem_read_cycles != 0) {
+                xrd = xmem[xmem_read_address];
+                if (!flag(CR3, XWORD)) xrd = s24(u24(xrd) & 0xffff00);
+            }
             xmem_read_address = xmem_index((uint32_t)cmem[cmem_operand(word)]);
             int bus = field(CR3, 17, 2);
             xmem_read_cycles = flag(CR3, XWORD) ? with_word[bus] : without[bus];

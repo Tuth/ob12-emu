@@ -26,6 +26,7 @@ struct Options {
     bool maclo_unsigned = false;     // primary 43 takes the low MAC word as unsigned
     bool maclo_shift = false;        // primary 43 product sits 24 bits lower, for double precision
     bool compare_3e = false;         // primary 3E flag 8 compares DMEM with CMEM, flags only
+    bool xread_flush = false;  // study: a new XMEM read completes the pending one first
     bool late_saturation_mode = false;  // secondary 2D acts after the primary, like 28-2B
     bool reuse_coefficient = false;  // primary 43 multiplies DMEM by the last multiplier C word
     bool bus_sum_saturates = false;  // the OB-12 voice output adds clip instead of wrapping
@@ -71,6 +72,8 @@ public:
     // Study access: the CMEM and DMEM index a word would use now.
     uint32_t study_cmem(uint32_t word) const { return cmem_operand(word); }
     uint32_t study_dmem(uint32_t word) const { return dmem_operand(word); }
+    uint32_t study_xmem(uint32_t address) const { return xmem_index(address); }
+    uint32_t study_xread() const { return xmem_read_address; }
 
 private:
     bool flag(int reg, int bit) const { return (cr[reg] >> bit) & 1; }
