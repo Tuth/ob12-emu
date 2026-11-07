@@ -1866,3 +1866,24 @@ Not checked on a unit. Panel C (wheels, keyboard sense) is not drawn on the pane
 
 Font note (Thor): the large program name on the display is Handel Gothic; file
 E:/dl/handelgotdlig-regular.zip. To use when the display font is reworked.
+
+## A-014 The Raver clicks (measured, cause open)
+
+Thor: The Raver clicks, and its slide sounds strange. Selected with 13 single encoder detents 0.35 s
+apart (display: A-014 The Raver, timbre A-113); it plays on DASP1. Notes 3C at 18 s, 48 legato at
+19 s, 3C legato at 20.5 s (`OB12_SERIAL`, `OB12_CHIP_LOG`).
+
+- No glide on the voice bus: 133 Hz goes to 265 Hz at 19.04 s and back at 20.6 s at once (pitch per
+  15 ms by autocorrelation, DASP3 AX2).
+- The clicks are steps in the waveform, on the voice bus already, so not the effects: high band
+  bursts (above 6 kHz, 1 ms windows) at 18.861, 18.877, 18.892, 18.907 (about 15 ms apart) and
+  21.345, 21.379, 21.409, 21.438 (about 30 ms apart). At each the wave drops at once.
+- No host write to DASP1 within 3 ms of any of them; so the step comes from inside the DSPs, a
+  modulator. The LFO bus is time multiplexed (a value change every 3 ms in every slot), so a plain
+  jump count says nothing; one slot has to be followed.
+- Note-on writes a 25 ms burst to C070/C072, C085/C087, C09A/C09C, C0AF/C0B1 (22 values each); their
+  role is not known.
+
+Next: follow the LFO slot that DASP1 reads and the cell it modulates; check whether an LFO wrap or
+step lands on the click times. Thor also hears LFO on programs that should have none; the same
+trace answers that.

@@ -99,6 +99,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "A-014 The Raver: periodic steps (clicks) on the voice bus every 15/30 ms, no host write at them; follow the LFO slot into DASP1. Also stray LFO on other programs (Thor)",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
     "Display font: large program name is Handel Gothic (E:/dl/handelgotdlig-regular.zip, Thor); small font nearly right",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",
