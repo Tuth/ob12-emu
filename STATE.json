@@ -36,7 +36,7 @@
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
   },
   "status": {
-    "phase": "Display reads clearly with a replacement font; thin VST3 and player working; CPU use next",
+    "phase": "Portamento works; effects have never run so far: real reload timer starts them, right channel then silent",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -75,7 +75,8 @@
       "Font format found; replacement sector built; firmware screens readable in the panel",
       "CPU load 6.56 to about 4.4 cores at real time; offline 1.96 x with profile guidance; output identical",
       "Two half frames per gate: 2.21 x offline, output identical; load about 4.5 cores, floor near 3",
-      "Bus wrap from Thor recording: six voice output adds saturate; 0 flips, 3 note run identical"
+      "Bus wrap from Thor recording: six voice output adds saturate; 0 flips, 3 note run identical",
+      "FC0400 is reload timer 1; glide step modelled, Timeless LD follows the keys"
     ],
     "blocked": []
   },
@@ -89,6 +90,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "Effects: run with OB12_RELOAD=1, find why MOUT right goes silent, then make the real timer the default",
     "Find the real AOVM mechanism at the bus adds; check voice level, a single note peaks at 3.3M of 8.4M",
     "CPU: faster step() is what lowers the floor",
     "Font polish: selected rows, real font sizes per number, glyphs above 7F, or a real flash dump",

@@ -45,6 +45,10 @@ public:
         set_vector(0x21, 0xfc0200);  // UART2 transmit, identified from the code at FC0200
         // FC0300 clears PUF0 and PUF1, and the firmware masks it through ICR08: it is the PPG tick.
         set_vector(0x1b, 0xfc0300);
+        // FC0400 clears UF of reload timer 1 and counts D148; every second call asks for a glide step.
+        set_vector(0x1e, 0xfc0400);
+        io[0xb9] = 6;
+        timer[1].tmcsr = 0x08;  // INTE, set by the missing resident boot
         io[0xb8] = 6;  // the level the firmware restores after masking
         io[0x30] = 0x10;  // PIE0, set by the missing resident boot
         // The resident routines evidently set up the serial ports and interrupt levels;
@@ -108,6 +112,10 @@ public:
         if (timebase >= interval) { timebase -= interval; io[0xa9] |= 0x08; }
         update_irq();
     }
+    void reload_tick() { timer[1].tmcsr |= 0x04; }  // UF; rate unknown, taken as 1 ms
+    // What FC0400 does every second call, alone. The full timer also starts the effects, whose right
+    // channel is still silent, see "Reload timer" in docs/HARDWARE.md.
+    void glide_tick() { ram[0xd15a] = 1; }
     void ppg_tick() { io[0x30] |= 0x08; }  // PUF0; the rate is set by the missing boot
 
     long steps = 0;

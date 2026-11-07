@@ -1294,3 +1294,35 @@ Open: the real mechanism. The word list is OB-12 specific and not a chip rule, s
 belong in the upstream PR. Hard clipping stays: 12 notes put MOUT left at the rail for 34% of the
 time at start-up Master Volume, which may mean voices are hotter here than on a real unit. A single
 note peaks near 3.3M of 8.4M.
+
+## Reload timer: portamento, and the effects that never started (measured)
+
+Thor saw program A-018, Timeless LD, timbre B-071, OB Unis ak, play every note at one pitch.
+Reproduced by encoder, 10 detents from A-001. Notes 30, 3C, 48, 54 all gave lines 130, 262, 526.
+
+Cause: another missing timer. The note reached the voice, at 8A70. But at note-on the Slave stores
+a glide offset at voice +0A, old note minus new note in cents times 64, read back as -2400 cents
+for note 54. FCDB10 walks that offset to zero, and it runs only when D:D15A is set. Only FC0400 sets
+it: an ISR that clears UF of reload timer 1 (I:3C bit 2), counts D:D148, and sets the flag every
+second call. Vector 1E. The firmware never programs the timer, so like the PPG it belongs to the
+missing boot, and the ISR never ran. So every note stayed on the pitch of the first.
+
+Fix: `glide_tick` sets D15A every 2 ms. Measured with note-offs: lines 67, 133, 260, 520 for the
+four notes. Rate inferred: 1 ms a tick, not calibrated. The glide table at FDE466 runs to 3250
+steps, so about 6.5 s at most at this rate.
+
+**The bigger finding.** Running the real timer (`OB12_RELOAD=1`) also advances D148, which a state
+machine at FCAC50 and on uses for delays. Then 177 DASP4 cells get host writes instead of 135, 79
+differ at the end, the effects get set up, and C0CE rises at start-up, with C0C4, C0C7 going to 0.
+So the boot AUX MODE question above has this answer, and **no effect has run in any test so far**:
+all sound here has been dry.
+
+With the effects on, MOUT right goes silent, constant -9, left drops to RMS 1290906. AOUT left 141.
+The right input is good at D00C and D004. D007 stays near 0 while D003 carries signal, and both
+reach the output at 068, 06B. Words between are not traced. XMEM is modelled; the two read
+paths may clash, unproven. That is why the default stays glide only: dry and stereo.
+
+New reference: MD5 2a42ebfc79fe39677a8678bf0246c54b, `ob12_system` and the engine agree.
+
+Open: find why the effect path drops the right channel, then turn the real timer on. Rate of the
+timer. Slave timer 0 and other vectors are still unset.

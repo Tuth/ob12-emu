@@ -29,6 +29,7 @@
 //   OB12_LIVE_SILENT=1  same timing, zeros to the device
 //   OB12_LIVE_MS=n   buffer length in ms, default 10; OB12_LIVE_BUFFERS=n, default 6
 //   OB12_LIVE_MIDI=d  take notes from MIDI input device d; OB12_LIVE_MIDI=list prints them
+//   OB12_RELOAD=1    run reload timer 1 in full; effects start, right channel goes silent
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
 //   OB12_POT_SWEEP_TO=t  pots stop moving at t seconds and stay there
 //   OB12_POT_STEPS=t:channel:mux:value,...  one pot jumps at t seconds, value hex
@@ -299,6 +300,7 @@ int main(int argc, char** argv) {
         }
     }
     if (const char* text = getenv("OB12_SLAVE_WATCH")) sscanf(text, "%x,%x", &s->watch_lo, &s->watch_hi);
+    bool full_reload = getenv("OB12_RELOAD") != nullptr;  // study: the real timer 1, which starts the effects
     int slave_tick = getenv("OB12_SLAVE_TICK") ? atoi(getenv("OB12_SLAVE_TICK")) : 96;
     std::vector<int> cell_pick;  // study: OB12_CELL_PICK=10,42 logs only these DMEM cells
     if (const char* list = getenv("OB12_CELL_PICK")) for (const char* c = list; c; c = strchr(c, ','), c = c ? c + 1 : c) cell_pick.push_back((int)strtol(c, nullptr, 16));
@@ -457,7 +459,7 @@ int main(int argc, char** argv) {
                 break;
             }
             m->pot_clock = now;
-            if (slave_tick && k % slave_tick == 0) s->ppg_tick();
+            if (slave_tick && k % slave_tick == 0) { s->ppg_tick(); if (full_reload) s->reload_tick(); else if (k % (2 * slave_tick) == 0) s->glide_tick(); }
             if (live_midi && k % 96 == 0) {
                 uint8_t bytes[64];
                 int n = live_midi_read(bytes, sizeof bytes);

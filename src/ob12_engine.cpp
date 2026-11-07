@@ -184,6 +184,7 @@ struct Engine::Impl {
         encoder_step();
         if (k % 96 == 0) {
             s->ppg_tick();
+            if (k % 192 == 0) s->glide_tick();
             take_inputs();
             if (k % 3072 == 0) {
                 std::lock_guard<std::mutex> hold(lcd_lock);
