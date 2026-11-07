@@ -375,13 +375,9 @@ public:
                         m.bytes[0] = 0x80; m.bytes[1] = (uint8_t)std::clamp<int>(e.noteOff.pitch, 0, 127);
                         m.bytes[2] = (uint8_t)std::lround(e.noteOff.velocity * 127);
                     } else if (e.type == Event::kPolyPressureEvent) {
-                        // VST3 has no channel pressure event, and a host that does not use IMidiMapping
-                        // can only pass aftertouch this way. The firmware ignores A0 (A-002 measured) and
-                        // answers D0, so the pressure goes on as channel pressure.
-                        m.bytes[0] = 0xD0;
-                        m.bytes[1] = (uint8_t)std::clamp<int>((int)std::lround(e.polyPressure.pressure * 127), 0, 127);
-                        m.count = 2;
-                        trace("poly pressure note %d %.3f", e.polyPressure.pitch, e.polyPressure.pressure);
+                        // Passed as it came, A0 note value, as the unit's MIDI IN would get it.
+                        m.bytes[0] = 0xA0; m.bytes[1] = (uint8_t)std::clamp<int>(e.polyPressure.pitch, 0, 127);
+                        m.bytes[2] = (uint8_t)std::clamp<int>((int)std::lround(e.polyPressure.pressure * 127), 0, 127);
                     } else if (e.type == Event::kDataEvent && e.data.bytes && e.data.size) {
                         // Some hosts (VSTHost) send controllers, bend and pressure as raw MIDI here, not
                         // through IMidiMapping; the Master reads them as the unit's MIDI input would.
