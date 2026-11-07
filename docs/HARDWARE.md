@@ -2098,3 +2098,26 @@ Results (inferred, not checked on a unit):
 
 Supersedes "The paired take-in, tried and reverted": that held every word a half frame by address;
 this follows the select, which the firmware itself frames.
+### Program loudness: Overdrive adds about 18 dB (measured, cause open)
+
+Thor: some programs, A-015 most, are far louder than on a unit in a video. One C3 per program,
+A-001 to A-032, engine (`seq_test`, 0.2-1.4 s after note on), rms against the median 786:
+most within +-6 dB; A-015 +17.4, A-022 +13.6; A-012, A-023 silent on C3, A-026 -22.
+The Overdrive lamp (latch 5 bit 6) after each program change is on for A-015 only. A-015 with its
+Overdrive key (bar 4 bit 5) pressed off: rms 615 against 5008, peak 2185 against 14409. So our
+overdrive raises the level by about 18 dB; a unit's overdrive presumably keeps it near the dry
+level. Open: which chip runs it, what the firmware writes for it, and whether a missing
+saturation or level step in the TMS57070 model makes the difference. A-022 (+13.6, no overdrive)
+not looked at.
+
+### Aftertouch, the manual and Thor's log (measured)
+
+The operating manual (ob12.clearalgo.com, 7.13) has the KEYBOARD SENSE AFTERTOUCH button
+enabling aftertouch, and per timbre AFTER-T settings; the MIDI IN filter has an AFTERT. switch.
+In our machine it is on: A-002 with D0 7F moves the spectral centroid from about 2000 to 3300 Hz.
+Thor's VSTHost log: his keyboard's pressure reached 06 of 127 in that take, as D1 and D0 both
+(two channels). Panel C (KEYBOARD SENSE, wheels) is still not drawn; its keys are bar 0.
+
+Bulk dump reload (manual 10.4): the dump comes back through MIDI IN and runs the UPDATING
+PROCEDURE, flash writes and a reset, so a .syx loader needs the flash kept between sessions and
+the reset modelled.
