@@ -1887,3 +1887,23 @@ apart (display: A-014 The Raver, timbre A-113); it plays on DASP1. Notes 3C at 1
 Next: follow the LFO slot that DASP1 reads and the cell it modulates; check whether an LFO wrap or
 step lands on the click times. Thor also hears LFO on programs that should have none; the same
 trace answers that.
+
+### The Raver click located: the new voice's start on a legato change (measured)
+
+Thor marked the click in the rendered WAV at sample 72 800-72 950 of the clip: 19.017 s in the run,
+the legato change 3C to 48. In his view: a sudden drop, a short burst of fast zig-zag, a spike up.
+
+DASP1 per sample (`OB12_CELL_LOG=1,0.995,1.05` with the note time at 18):
+- The cells that move most are a voice that was idle until 19.0164 s: D1F, D1E, D16, D20, D45, D44.
+- D45 is that voice's waveform: a clean saw from about 19.022 s, with two spikes before it, about
+  2 and 4 ms after the start.
+- At the same moments D16 and D1E rise in steps and fall back, D20 rises in steps to the rail
+  (8388608) and stays there, D1F dips negative and returns. The steps keep the rhythm of the
+  Slave's note-start burst (C070/C072, C085/C087, C09A/C09C, C0AF/C0B1, a pair every 0.9 ms for
+  25 ms).
+- Saturating the rare wrapping words on DASP1 (A6727140 at 1D9, 26425AB5 at 079, 26403140 at 082)
+  removes their wraps but not the click; reverted.
+
+Open: which words write D16, D1E, D20, D1F, whether those cells are meant to reach the rail, and
+how the voice output D45 uses them. `OB12_WATCH_D` lists the writer PCs of DMEM cells on DASP0;
+it needs a chip choice for DASP1.
