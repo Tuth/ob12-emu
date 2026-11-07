@@ -85,7 +85,8 @@
       "Panel positions from the vector art (Amp sliders were one track off); LCD drawn as an even dot matrix",
       "Panel: slider caps and knob faces taken out of the art and drawn at their values",
       "LEDs: Master shifts latch bytes on port 8 (bit 5 data, bit 6 clock), strobes 68FF80+n; 18 lamps mapped and drawn",
-      "All 89 panel LEDs mapped (46 lamps, 43 indicators) from the service manual sheets and layouts"
+      "All 89 panel LEDs mapped (46 lamps, 43 indicators) from the service manual sheets and layouts",
+      "Glide click: a stage's A and A+1 host words take effect together; offset kept; reference e17ac3f1"
     ],
     "blocked": []
   },
@@ -99,7 +100,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "A-014 The Raver click: firmware write race (C03A/C03B one word apart, DSP needs them in one sample); clicks on about every second legato change; decide firmware-true vs grouped host take-in",
+    "The Raver glide click: paired A/A+1 host take-in (on); confirm by ear; residual start jump 0.029 vs 0.012",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
     "Display font: large program name is Handel Gothic (E:/dl/handelgotdlig-regular.zip, Thor); small font nearly right",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",
