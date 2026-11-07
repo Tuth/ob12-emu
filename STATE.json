@@ -140,5 +140,6 @@
   },
   "decisions": [
     "2026-11-07 Thor: Resonance 127 stays firmware-true (damping 0, self-oscillation), no limiter"
-  ]
+  ],
+  "lamps": "Dark lamps fixed: f2mc16 bank prefix now expires after the next instruction (JMP @A kept it). VST3 in build/next; PGO build pending."
 }

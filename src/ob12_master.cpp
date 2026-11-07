@@ -194,6 +194,7 @@ public:
                 snprintf(line, sizeof line, "watch step %ld PC %06X write %06X = %02X PS %04X", steps, pc, address, data, ob12_ps());
                 watch_log.push_back(line);
             }
+            if (mwatch_hi && cell >= mwatch_lo && cell < mwatch_hi && pc >= mwatch_pc_lo && pc < mwatch_pc_hi) printf("master watch %.4f pc %06X W %06X %02X\n", cycles_total / 16e6, pc, address, data);  // study: OB12_MASTER_WATCH
             ram[cell] = data;
             return;
         }
@@ -279,6 +280,7 @@ public:
     u8 int_mask = 0;
     long watch_from = 0;
     u32 watch_lo = 0, watch_hi = 0;
+    u32 mwatch_lo = 0, mwatch_hi = 0, mwatch_pc_lo = 0, mwatch_pc_hi = 0x1000000;  // study: print RAM writes to these cells (address & 3FFFF)
     std::vector<std::string> watch_log;
     long steps = 0;
     s64 cycles_total = 0;

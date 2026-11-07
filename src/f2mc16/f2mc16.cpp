@@ -1840,6 +1840,11 @@ void f2mc16_device::execute_run()
 			break;
 
 		}
+		// OB-12: a bank prefix covers only the next instruction. One that does not use it, such as
+		// JMP @A, still uses it up; left valid it moved the next memory access to the prefix bank.
+		// The Master's lamp dispatcher (F0E9DC: DTB: JMP @A) read its latch index from the wrong
+		// bank and lit Mono, Legato and the like on latch 0. See docs/HARDWARE.md.
+		if (opcode < 0x04 || opcode > 0x07) m_prefix_valid = false;
 	}   // while icount > 0
 }
 

@@ -2057,3 +2057,14 @@ prints both images and the flag at each strobe. Pressing Mono, Legato, Portament
 3, but both images stay 44 and 14, equal to the bytes shifted out, and EC5B30 stays 00. So the shift
 model is right and the firmware does not set these lamps. Open: which Master routine sets the lamp
 image after a key press, and why it does not run or does not see the change here.
+
+Retracted: "the firmware does not set these lamps". It does; our CPU core lost the writes. The lamp
+dispatcher F0E983 stores the latch index (Mono: 02) at ECB7BA, then jumps with `F0E9DC: 05 61`
+(DTB prefix, JMP @A). The core kept the prefix valid after JMP @A, because only memory-using
+instructions cleared it, so the handler's first `MOVW A,@RW3-2` (F0EA1E) read from the DTB bank and
+got latch 0. A bank prefix covers only the next instruction: the core now drops it after every
+instruction that is not itself a prefix (src/f2mc16/f2mc16.cpp, end of execute_run).
+Measured after the fix: the lamp image writes reach latches 2, 3, 5, 6, 7 (EC5B0B..EC5B10) on the
+key presses; A-001 opens with the Osc 1 and Osc 2 saw, Chorus, Delay, Reverb, Level, Part 1,
+Single, Program lamps and the filter and routing indicators lit. Audio reference unchanged:
+engine_test rom 16 MD5 12b99e29202c84dbeeeae1ed2621d50b (the Slave never hit the case).
