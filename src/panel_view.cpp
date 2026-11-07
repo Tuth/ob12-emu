@@ -74,6 +74,8 @@ struct PanelView::Impl {
 
     int pot_value[sizeof panel_pots / sizeof panel_pots[0]];
     Moving moving[sizeof panel_pots / sizeof panel_pots[0]];
+    Moving dial;           // the data entry dial: its dimple turns about the centre
+    float dial_angle = 0;  // degrees, 15 per detent turned
     std::vector<ID2D1Layer*> live_layers;
     int drag_pot = -1, drag_start_y = 0, drag_start_value = 0, down_key = -1;
     bool drag_dial = false;
@@ -116,6 +118,41 @@ struct PanelView::Impl {
         for (size_t i = 0; i + 1 < r.points.size(); i += 2) {
             x0 = std::min(x0, r.points[i]); x1 = std::max(x1, r.points[i]);
             y0 = std::min(y0, r.points[i + 1]); y1 = std::max(y1, r.points[i + 1]);
+        }
+    }
+
+    // The data dial: a large gradient disc and a dimple drawn in its own clip. The dimple's clip run and
+    // everything up to its pop turn with the encoder.
+    void find_dial() {
+        const float k = art_w / panel_frame_w;
+        float sx = 0, sy = 0; int n = 0;
+        for (const Run& run : runs) {
+            if (run.mode != 1 || run.points.empty()) continue;
+            float x0, y0, x1, y1;
+            box(run, x0, y0, x1, y1);
+            float w = (x1 - x0) / k, h = (y1 - y0) / k;
+            if (w < 140 || w > 160 || h < 140 || h > 160) continue;
+            if (std::fabs((x0 + x1) / 2 / k - 1757) > 40 || std::fabs((y0 + y1) / 2 / k - 383) > 40) continue;
+            sx += (x0 + x1) / 2; sy += (y0 + y1) / 2; n++;
+        }
+        if (!n) return;
+        dial.cx = sx / n; dial.cy = sy / n;
+        for (int r = 0; r < (int)runs.size(); r++) {
+            if (runs[r].mode != 4) continue;
+            float x0, y0, x1, y1;
+            box(runs[r], x0, y0, x1, y1);
+            float w = (x1 - x0) / k;
+            if (w < 28 || w > 55 || std::hypot((x0 + x1) / 2 - dial.cx, (y0 + y1) / 2 - dial.cy) > 45 * k) continue;
+            int depth = 0;
+            for (int q = r; q < (int)runs.size(); q++) {
+                if (runs[q].mode == 4) depth++;
+                if (runs[q].mode == 5) depth--;
+                dial.runs.push_back(q);
+                runs[q].moving = true;
+                if (depth == 0) break;
+            }
+            dial.found = true;
+            break;
         }
     }
 
@@ -173,7 +210,7 @@ struct PanelView::Impl {
                 long sn = 0;
                 for (int r = 0; r < (int)runs.size(); r++) {
                     const Run& run = runs[r];
-                    if (r == body || run.mode >= 4 || run.points.empty() || (run.argb == 0xffbcbec0 && runs[body].mode == 2)) continue;
+                    if (r == body || run.mode >= 4 || run.points.empty()) continue;  // the light pointer line turns too
                     int figures = (int)std::count(run.kinds.begin(), run.kinds.end(), (uint8_t)0);
                     if (figures > 8) continue;  // the knurled ring
                     bool inside = true;  // every point of the shape on the knob's face
@@ -256,6 +293,24 @@ struct PanelView::Impl {
             target->SetTransform(place * D2D1::Matrix3x2F::Scale(scale, scale));
             size_t depth = 0;
             for (int r : m.runs) {
+                const Run& run = runs[r];
+                if (run.mode == 4) {
+                    if (depth == live_layers.size()) { ID2D1Layer* l = nullptr; target->CreateLayer(&l); live_layers.push_back(l); }
+                    target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), run.geometry), live_layers[depth++]);
+                } else if (run.mode == 5) {
+                    if (depth) { target->PopLayer(); depth--; }
+                } else {
+                    paint->SetColor(color(run.argb));
+                    if (run.mode == 3) target->DrawGeometry(run.geometry, paint, run.width);
+                    else target->FillGeometry(run.geometry, paint);
+                }
+            }
+            while (depth) { target->PopLayer(); depth--; }
+        }
+        if (dial.found) {  // the dial's dimple, turned by the encoder
+            target->SetTransform(D2D1::Matrix3x2F::Rotation(dial_angle, D2D1::Point2F(dial.cx, dial.cy)) * D2D1::Matrix3x2F::Scale(scale, scale));
+            size_t depth = 0;
+            for (int r : dial.runs) {
                 const Run& run = runs[r];
                 if (run.mode == 4) {
                     if (depth == live_layers.size()) { ID2D1Layer* l = nullptr; target->CreateLayer(&l); live_layers.push_back(l); }
@@ -460,6 +515,7 @@ struct PanelView::Impl {
 
     // The panel drawn into a WIC bitmap and saved as PNG, off screen: for checking it by eye.
     bool save_image(const char* path) {
+        if (const char* a = getenv("OB12_PANEL_SHOT_DIAL")) dial_angle = (float)atof(a);  // study: dial angle for a shot
         if (const char* v = getenv("OB12_PANEL_SHOT_VALUE"))  // study: every pot at this value, 0-255
             for (int& value : pot_value) value = atoi(v);
         drop_target();
@@ -614,7 +670,13 @@ struct PanelView::Impl {
             if (percent > 0 && percent <= 400 && self->width_request) self->width_request(PanelView::base_width * percent / 100);
             return 0;
         }
-        case WM_MOUSEWHEEL: self->engine.turn(GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA); return 0;
+        case WM_MOUSEWHEEL: {
+            int detents = GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA;
+            self->engine.turn(detents);
+            self->dial_angle += 15.f * detents;  // the dial turns with the encoder
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+        }
         }
         return DefWindowProcW(hwnd, message, wparam, lparam);
     }
@@ -624,6 +686,7 @@ PanelView::PanelView(Engine& engine, const std::string& art_file) : impl(new Imp
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &impl->factory);
     impl->load(art_file);
     impl->find_moving();
+    impl->find_dial();
     impl->build_geometry();
 }
 
