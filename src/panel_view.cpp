@@ -79,7 +79,7 @@ struct PanelView::Impl {
     std::vector<ID2D1Layer*> live_layers;
     int drag_pot = -1, drag_start_y = 0, drag_start_value = 0, down_key = -1;
     bool drag_dial = false;
-    int dial_y = 0;
+    float dial_grab = 0, dial_rest = 0;  // mouse angle at the last move, degrees not yet a detent
     uint8_t lcd_bits[30 * 64];
 
     explicit Impl(Engine& e) : engine(e) {
@@ -630,14 +630,29 @@ struct PanelView::Impl {
                 return;
             }
         }
-        if (hypotf(fx - panel_dial_x, fy - panel_dial_y) < panel_dial_r) { drag_dial = true; dial_y = y; }
+        if (hypotf(fx - panel_dial_x, fy - panel_dial_y) < panel_dial_r) {
+            drag_dial = true;
+            dial_grab = atan2f(fx - panel_dial_x, -(fy - panel_dial_y)) * 180 / 3.14159265f;
+            dial_rest = 0;
+        }
     }
 
-    void mouse_move(int y) {
+    // The dial turns with the mouse around its centre, all the way round; every 15 degrees is one
+    // encoder detent, clockwise up.
+    void mouse_move(int x, int y) {
         if (drag_pot >= 0) set_pot(drag_pot, drag_start_value + (drag_start_y - y) * 256 / std::max(60, height / 3));
         if (drag_dial) {
-            int detents = (dial_y - y) / 6;
-            if (detents) { engine.turn(detents); dial_y -= detents * 6; }
+            float s = sx();
+            float a = atan2f(x / s - panel_dial_x, -(y / s - panel_dial_y)) * 180 / 3.14159265f;
+            float d = a - dial_grab;
+            if (d > 180) d -= 360;
+            if (d < -180) d += 360;
+            dial_grab = a;
+            dial_angle += d;
+            dial_rest += d;
+            int detents = (int)(dial_rest / 15);
+            if (detents) { engine.turn(detents); dial_rest -= detents * 15.f; }
+            InvalidateRect(window, nullptr, FALSE);
         }
     }
 
@@ -661,7 +676,7 @@ struct PanelView::Impl {
         case WM_ERASEBKGND: return 1;
         case WM_TIMER: InvalidateRect(hwnd, nullptr, FALSE); return 0;
         case WM_LBUTTONDOWN: self->mouse_down(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)); return 0;
-        case WM_MOUSEMOVE: self->mouse_move(GET_Y_LPARAM(lparam)); return 0;
+        case WM_MOUSEMOVE: self->mouse_move(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)); return 0;
         case WM_LBUTTONUP: self->mouse_up(); return 0;
         case WM_RBUTTONUP: self->scale_menu(lparam); return 0;
         case WM_COMMAND: {
