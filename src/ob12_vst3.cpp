@@ -366,17 +366,18 @@ public:
                 for (int32 i = 0; i < count; i++) {
                     Event e{};
                     if (data.inputEvents->getEvent(i, e) != kResultOk) continue;
-                    // The Master takes one channel; every host channel goes to it.
+                    // A MIDI bridge: each message keeps its channel, as on the unit's MIDI IN. The Master
+                    // decides what it listens to (its channel, the parts of a multi).
                     Message m{e.sampleOffset, order++, {}, 3};
                     if (e.type == Event::kNoteOnEvent) {
-                        m.bytes[0] = 0x90; m.bytes[1] = (uint8_t)std::clamp<int>(e.noteOn.pitch, 0, 127);
+                        m.bytes[0] = 0x90 | (e.noteOn.channel & 15); m.bytes[1] = (uint8_t)std::clamp<int>(e.noteOn.pitch, 0, 127);
                         m.bytes[2] = (uint8_t)std::max(1, (int)std::lround(e.noteOn.velocity * 127));
                     } else if (e.type == Event::kNoteOffEvent) {
-                        m.bytes[0] = 0x80; m.bytes[1] = (uint8_t)std::clamp<int>(e.noteOff.pitch, 0, 127);
+                        m.bytes[0] = 0x80 | (e.noteOff.channel & 15); m.bytes[1] = (uint8_t)std::clamp<int>(e.noteOff.pitch, 0, 127);
                         m.bytes[2] = (uint8_t)std::lround(e.noteOff.velocity * 127);
                     } else if (e.type == Event::kPolyPressureEvent) {
                         // Passed as it came, A0 note value, as the unit's MIDI IN would get it.
-                        m.bytes[0] = 0xA0; m.bytes[1] = (uint8_t)std::clamp<int>(e.polyPressure.pitch, 0, 127);
+                        m.bytes[0] = 0xA0 | (e.polyPressure.channel & 15); m.bytes[1] = (uint8_t)std::clamp<int>(e.polyPressure.pitch, 0, 127);
                         m.bytes[2] = (uint8_t)std::clamp<int>((int)std::lround(e.polyPressure.pressure * 127), 0, 127);
                     } else if (e.type == Event::kDataEvent && e.data.bytes && e.data.size) {
                         // Some hosts (VSTHost) send controllers, bend and pressure as raw MIDI here, not
@@ -391,11 +392,15 @@ public:
                         else if (status == 0xf1 || status == 0xf3 || (status >= 0xc0 && status < 0xe0)) length = 2;
                         else if (status == 0xf2 || (status >= 0x80 && status < 0xc0) || (status >= 0xe0 && status < 0xf0)) length = 3;
                         m.raw.assign(e.data.bytes, e.data.bytes + std::min(length, size));
+                        if (status >= 0x80 && status < 0xf0) raw_channel_messages = true;
                     } else continue;
                     list.push_back(m);
                 }
             }
-            if (IParameterChanges* changes = data.inputParameterChanges) {
+            // Hosts that pass raw MIDI (VSTHost) also feed the controller mapping; taking both sent
+            // every bend and pressure twice. The mapping is used only by a host that sends no raw MIDI.
+            IParameterChanges* changes = raw_channel_messages ? nullptr : data.inputParameterChanges;
+            if (changes) {
                 int32 count = changes->getParameterCount();
                 for (int32 i = 0; i < count; i++) {
                     IParamValueQueue* queue = changes->getParameterData(i);
@@ -466,6 +471,7 @@ private:
     std::atomic<uint32> refs{1};
     Facet facet{*this};
     std::unique_ptr<Instrument> instrument;
+    bool raw_channel_messages = false;  // the host sends channel messages as raw MIDI data events
     std::mutex instrument_lock;
     double rate = 48000;
 };
