@@ -65,7 +65,27 @@ struct Host {
     std::vector<u8> buffer;
     bool running = false, start_pending = false;
 
-    void deselect() { if (state == Update) { state = Idle; buffer.clear(); } }
+    // An update transaction (03, then address and value words, under one chip select) takes effect
+    // when the Slave releases the select, all words at once: no DSP sample sees half of a burst.
+    // The Slave writes a voice's coupled words (oscillator rate and its partner, a glide stage's
+    // A and A+1) inside one burst; taken in one by one, a sample between two of them clicked.
+    // See "Host bursts" in docs/HARDWARE.md. OB12_HOST_SINGLE=1 is the old model.
+    bool burst = getenv("OB12_HOST_SINGLE") == nullptr;
+    std::vector<std::pair<int, int32_t>> pending, ready;
+
+    // A released burst goes in at the start of the chip's next sample, so no sample reads half of it.
+    void sample_start() {
+        for (auto& w : ready) dsp->cmem[w.first] = w.second;
+        ready.clear();
+    }
+
+    void deselect() {
+        if (state != Update) return;
+        ready.insert(ready.end(), pending.begin(), pending.end());
+        pending.clear();
+        state = Idle;
+        buffer.clear();
+    }
     void byte(u8 data) {
         switch (state) {
         case Idle:
@@ -102,7 +122,8 @@ struct Host {
             buffer.push_back(data);
             if (buffer.size() == 5) {
                 int address = (buffer[0] << 8 | buffer[1]) & 0x1ff;
-                dsp->cmem[address] = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
+                int32_t value = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
+                if (burst) pending.push_back({address, value}); else dsp->cmem[address] = value;
                 buffer.clear();
             }
             break;
@@ -235,6 +256,7 @@ struct Engine::Impl {
                     d->ar[1][c] = snap[before][part][n - 1][2][c];
                 }
             }
+            if (part == 0) h.sample_start();
             if (h.start_pending && part == 0) { h.start_pending = false; h.running = true; }
             if (h.running) for (int i = 0; i < 256; i++) d->step();
             memcpy(snap[now][part][n], d->ax, sizeof d->ax);

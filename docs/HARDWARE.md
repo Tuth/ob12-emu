@@ -2068,3 +2068,33 @@ Measured after the fix: the lamp image writes reach latches 2, 3, 5, 6, 7 (EC5B0
 key presses; A-001 opens with the Osc 1 and Osc 2 saw, Chorus, Delay, Reverb, Level, Part 1,
 Single, Program lamps and the filter and routing indicators lit. Audio reference unchanged:
 engine_test rom 16 MD5 12b99e29202c84dbeeeae1ed2621d50b (the Slave never hit the case).
+
+
+### Host bursts: the DSP takes a select's words in together, at its next sample (measured, inferred)
+
+Thor: A-018 (mono lead) pops on every note; on a unit in a video it does not. A-014 clicks on the
+unit too, so that one is the firmware's.
+
+Measured on A-018 (`OB12_MIDI_EVENTS=12:pc:11,13:on:3c,...`, host log in microseconds with the chip
+select edges): single sample spikes up to 8386 at note starts, each where the Slave writes an
+oscillator's coupled words (C046/C048, C05B/C05D, C070/C072, C085/C087, C09A/C09C, C0AF/C0B1, rate
+and its partner) and the glide stages (C0x4/C0x5, C0xA/C0xB). Taken in one by one, about 10 us
+apart, a DSP sample between the two halves of a pair runs one sample with a mismatched pair.
+
+The Slave's write loop (FC29B9-FC29F1) is unrolled, five bytes per word, with no wait on the DSP, so
+the pacing is CPU speed alone. But it sends at most 16 words per chip select (03, then 16 address
+and value words, select released, about 220 us per burst). Sixteen is the TMS57002's update ring
+size, and MAME's 57002 notes that a write "shouldn't really happen until CLOAD is high". So the
+model now holds a select's update words and takes them in together at the chip's next sample start
+after the select is released (engine and ob12_system alike; `OB12_HOST_SINGLE=1` is the old model).
+
+Results (inferred, not checked on a unit):
+- A-018 harness: largest spikes 8386, 7565 at 14.016 s gone; worst now 2931, on the first note after
+  the program change (13.018). Engine: the pops at 14.22 and 17.012 s gone.
+- The Raver: the note start spike at 13.015 s gone; the first legato change (14.02) stays rough,
+  as the unit's video also clicks.
+- New reference, engine = `OB12_MIDI_NOTES=3c,40,43 ob12_system rom 16 13`: MD5
+  3c2d15f9399f304600b874fa530738e1.
+
+Supersedes "The paired take-in, tried and reverted": that held every word a half frame by address;
+this follows the select, which the firmware itself frames.

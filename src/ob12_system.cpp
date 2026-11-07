@@ -31,6 +31,7 @@
 //   OB12_LIVE_MS=n   buffer length in ms, default 10; OB12_LIVE_BUFFERS=n, default 6
 //   OB12_LIVE_MIDI=d  take notes from MIDI input device d; OB12_LIVE_MIDI=list prints them
 //   OB12_NO_RELOAD=1  no reload timer 1: dry sound, glide only
+//   OB12_HOST_SINGLE=1  host update words take effect one by one, not together when the select ends
 //   OB12_XREAD_CANCEL=1  a new XMEM read cancels the pending one (old model)
 //   OB12_XMEM_CR3=1  DASP4 XMEM size from CR3 (32K words) instead of the board's 128K
 //   OB12_EARLY_2D=1  secondary 2D before the primary: all LFOs stand still
@@ -85,7 +86,29 @@ struct Host {
     int chip = 0;
     const double* clock = nullptr;
 
-    void deselect() { if (state == Update) { state = Idle; buffer.clear(); } }
+    // An update transaction takes effect when the Slave releases the chip select, all its words at
+    // once (same as the engine; see "Host bursts" in docs/HARDWARE.md). OB12_HOST_SINGLE=1: one by one.
+    bool burst = getenv("OB12_HOST_SINGLE") == nullptr;
+    std::vector<std::pair<int, int32_t>> pending, ready;
+
+    // A released burst goes in at the start of the chip's next sample, so no sample reads half of it.
+    void sample_start() {
+        for (auto& w : ready) commit(w.first, w.second);
+        ready.clear();
+    }
+
+    void commit(int address, int32_t value) {
+        dsp->cmem[address] = value;
+        updates++;
+        if (log) fprintf(log, "%.6f W %d C%03X %06X\n", *clock, chip, address, value & 0xffffff);
+    }
+    void deselect() {
+        if (state != Update) return;
+        ready.insert(ready.end(), pending.begin(), pending.end());
+        pending.clear();
+        state = Idle;
+        buffer.clear();
+    }
     void byte(u8 data) {
         switch (state) {
         case Idle:
@@ -124,9 +147,8 @@ struct Host {
             buffer.push_back(data);
             if (buffer.size() == 5) {
                 int address = (buffer[0] << 8 | buffer[1]) & 0x1ff;
-                dsp->cmem[address] = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
-                updates++;
-                if (log) fprintf(log, "%.6f W %d C%03X %06X\n", *clock, chip, address, dsp->cmem[address] & 0xffffff);
+                int32_t value = (int32_t)((uint32_t)(buffer[2] << 16 | buffer[3] << 8 | buffer[4]) << 8) >> 8;
+                if (burst) pending.push_back({address, value}); else commit(address, value);
                 buffer.clear();
             }
             break;
@@ -240,6 +262,7 @@ int main(int argc, char** argv) {
         if (hold_bytes) held.push_back({selected, data}); else host_byte(selected, data);
     };
     s->on_dsp_select = [&]() {
+        if (host_log) fprintf(host_log, "%.6f SEL\n", clock);  // study: chip select edges between host words
         if (hold_bytes) held.push_back({0x80, 0}); else for (auto& h : host) h.deselect();
     };
 
@@ -624,13 +647,15 @@ int main(int argc, char** argv) {
             if (threaded) {
                 for (int n = 0; n < 5; n++) {
                     Host& h = host[n];
+                    if (((k + (n == 4 ? phase : 0)) & 1) == 0) h.sample_start();
                     if (h.start_pending && ((k + (n == 4 ? phase : 0)) & 1) == 0) { h.start_pending = false; h.running = true; }
                 }
                 dsp_gate.open(5);
             } else
             for (int n = 0; n < 5; n++) {
                 Host& h = host[n];
-                if (h.start_pending && ((k + (n == 4 ? phase : 0)) & 1) == 0) { h.start_pending = false; h.running = true; }
+                if (((k + (n == 4 ? phase : 0)) & 1) == 0) h.sample_start();
+                    if (h.start_pending && ((k + (n == 4 ? phase : 0)) & 1) == 0) { h.start_pending = false; h.running = true; }
                 if (n == 0 && h.dsp->cmem[watch] != watch_value && watch_log < 24) {  // a host write
                     printf("C%03X host %06X -> %06X at %.4f s\n", watch, watch_value & 0xffffff, h.dsp->cmem[watch] & 0xffffff, now);
                     watch_value = h.dsp->cmem[watch];

@@ -141,5 +141,8 @@
   "decisions": [
     "2026-11-07 Thor: Resonance 127 stays firmware-true (damping 0, self-oscillation), no limiter"
   ],
-  "lamps": "Dark lamps fixed: f2mc16 bank prefix now expires after the next instruction (JMP @A kept it). VST3 in build/next; PGO build pending."
+  "lamps": "Dark lamps fixed: f2mc16 bank prefix now expires after the next instruction (JMP @A kept it). VST3 in build/next; PGO build pending.",
+  "reference_md5": "3c2d15f9399f304600b874fa530738e1",
+  "host_bursts": "Host update words taken in per chip select (16 words), at the next sample start. A-018 pops gone; first note after program change still has one spike. OB12_HOST_SINGLE=1 old model.",
+  "controllers": "VST3 IMidiMapping: CC 0-127, aftertouch, pitch bend forwarded to the Master."
 }
