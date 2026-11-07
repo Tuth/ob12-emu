@@ -99,7 +99,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "A-014 The Raver click: at the new voice start on a legato change (19.017 s), DASP1 D16/D1E/D20/D1F step with the Slave note-start burst, D20 hits the rail, D45 (voice wave) spikes; find their writers",
+    "A-014 The Raver click: DASP1 control stage 018-021 (on only in this program, C03A-C03E) saturates at voice start; check 79 constant alignment and which timbre parameter sets C03A-C03E",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
     "Display font: large program name is Handel Gothic (E:/dl/handelgotdlig-regular.zip, Thor); small font nearly right",
     "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",

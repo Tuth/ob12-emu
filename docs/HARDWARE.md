@@ -1922,3 +1922,21 @@ DASP1 traced one sample at 19.0170 and 19.0185 s (`OB12_TRACE_CHIP=1 OB12_TRACE4
 Open: the input of this filter at a voice start, and whether D20 is meant to reach the rail; a
 different overflow rule on the real chip (unsigned, or wrap where the model saturates) is the
 candidate. Nothing changed.
+
+### The Raver click: a control stage only this program turns on (measured)
+
+The block 018-021: `79` loads a constant into the MAC upper word (core: mac_set_upper, lower 0), the
+following `6C` add coefficient x state; so y = constant + sum of products, stored by secondary 02.
+Input D34 = 0B7504 (0.089) at the voice start.
+
+The coefficients are set per program. A-001 and A-004 on DASP0: C03A 0, C03B 0, C03C 2AAAAA,
+C03D 0, C03E E00000, so D20 is a constant one third and the stage does nothing. The Raver on DASP1:
+C03A FF3412, C03B 811041, C03C 476BE0, C03D C76BE0, an active two pole stage. A rough DC gain,
+(0.558 - 0.442) / (1 - 0.992), is about 15; times 0.089 that is above full scale, so in the model
+the stage runs into the rail at every voice start, and the click is its states hitting the limits.
+
+Not settled: whether the real chip saturates here too (then the click is real) or the arithmetic
+differs (the alignment of the `79` constant against the products, or the MAC shift mode). The
+stage is probably what Thor hears as the strange slide. Next: the role of C03A-C03E from the Slave
+side (which timbre parameter writes them), and the `79` alignment checked against another
+program that uses the stage without clicking.
