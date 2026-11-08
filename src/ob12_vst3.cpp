@@ -59,6 +59,29 @@ std::string rom_folder() {
     return "F:\\Claude\\OB-12\\rom";
 }
 
+// The analog output channel of the main board (service manual, "OUTPUT STEREO CHANNEL" and "ANALOG
+// OUTPUTs", sheets 1/15 and 11/15): PCM1716 DAC, 3.1 Vpp at digital full scale; an MFB low pass with
+// gain 1 (R150 / R143 = 2K55 / 2K55); an inverting stage with gain 2.375 (R149 / R146 = 47K5 / 20K0),
+// 7.35 Vpp; C80 10u into R141 47K and C25 10u into R54 10K couple it. The op amps run on +-12 V, far
+// from 7.35 Vpp, so the path is linear: a gain and two DC blocks. The low passes (47 kHz, 70.5 kHz)
+// take about 0.5 dB at 20 kHz and are left out. The plug-in's full scale stays the DAC's, so the jack
+// level comes out 7.5 dB above it.
+struct AnalogOut {
+    static constexpr float gain = 47.5f / 20.0f;
+    float x1[2] = {}, y1[2] = {}, x2[2] = {}, y2[2] = {};
+    float a1 = 0, a2 = 0;  // one pole high pass coefficients at 48 kHz
+    AnalogOut() {
+        a1 = 1.f / (1.f + 6.2831853f * (1.f / (6.2831853f * 10e-6f * 47e3f)) / 48000.f);  // 0.34 Hz
+        a2 = 1.f / (1.f + 6.2831853f * (1.f / (6.2831853f * 10e-6f * 10e3f)) / 48000.f);  // 1.6 Hz
+    }
+    float run(int c, float x) {
+        float h1 = a1 * (y1[c] + x - x1[c]); x1[c] = x; y1[c] = h1;
+        float g = h1 * gain;
+        float h2 = a2 * (y2[c] + g - x2[c]); x2[c] = g; y2[c] = h2;
+        return h2;
+    }
+};
+
 // The machine and its feeding thread.
 struct Instrument {
     std::unique_ptr<Engine> engine;
@@ -67,6 +90,7 @@ struct Instrument {
     std::vector<float> ring = std::vector<float>(ring_size * 2);
     std::atomic<uint32_t> written{0}, read{0};
     std::atomic<long> underruns{0};
+    AnalogOut analog;
     double position = 0, step = 1;  // resampling, frames of 48 kHz per host frame
     float last[2] = {}, next[2] = {};
 
@@ -85,8 +109,8 @@ struct Instrument {
                 if (!ready) continue;
                 uint32_t w = written.load(std::memory_order_relaxed);
                 for (int i = 0; i < 240; i++, w++) {
-                    ring[(w & (ring_size - 1)) * 2] = block[i * 2] / 8388608.f;
-                    ring[(w & (ring_size - 1)) * 2 + 1] = block[i * 2 + 1] / 8388608.f;
+                    ring[(w & (ring_size - 1)) * 2] = analog.run(0, block[i * 2] / 8388608.f);
+                    ring[(w & (ring_size - 1)) * 2 + 1] = analog.run(1, block[i * 2 + 1] / 8388608.f);
                 }
                 written.store(w, std::memory_order_release);
             }

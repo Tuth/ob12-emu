@@ -2219,3 +2219,21 @@ passages. What stays is the absolute level, -25 dBFS for one clean note, which t
 output stage (DAC, op amps) may make up; its gain is not known from the firmware.
 Note: tms57070.h changed (study fields), so build_pgo.bat must run before the next engine or plug-in
 build.
+
+## Analog output (service manual sheets 1/15 "OUTPUT STEREO CHANNEL", 11/15 "ANALOG OUTPUTs")
+
+- DAC: PCM1716 (Burr-Brown), full scale 0.62 Vcc = 3.1 Vpp at 5 V, as the sheet marks it.
+- Its setup from the Slave (UART1, `20 10 60 C2 80 FF C0 FF`, sent LSB first, so each byte bit
+  reversed on MD): words 0408, 0643, 01FF, 03FF. Register 2: IW1 0, IW0 1; register 3: I2S 1, LRP 1,
+  SF0 1: 24-bit I2S. Registers 0 and 1: attenuation FF with LDL/LDR set, 0 dB both channels. So the
+  DAC adds no gain or loss; the DSP word's full scale is the DAC's 3.1 Vpp.
+- Then per channel: C80 10u into R141 47K (0.34 Hz), an MFB low pass with gain 1 (R143, R148, R150
+  2K55; C86 220p, C82 470p; the sheet: Ft1 47.0 kHz, G 1), an inverting stage R149 47K5 / R146 20K0 =
+  2.375 with C83 47p (Ft2 70.5 kHz), 7.35 Vpp; STOUT mixes the other channel through R145 10K for mono;
+  C25 10u into R54 10K (1.6 Hz), R55 1K5, the J108 mute FET, R52 680E, a ferrite, the jack.
+- TL072s on +-12 V: 7.35 Vpp is far from their swing, so the path is linear. It sets the absolute
+  level (+7.5 dB over the DAC) and cannot change one program against another.
+
+The plug-in now models it (`AnalogOut` in ob12_vst3.cpp): gain 2.375 and the two DC blocks; the low
+passes (about 0.5 dB at 20 kHz) are left out. The engine and its references are unchanged; the
+smoke test's rms went from 0.0216 to 0.0552.
