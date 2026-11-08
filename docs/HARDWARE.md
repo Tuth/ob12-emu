@@ -2301,3 +2301,12 @@ it off; Aftertouch opens AFTER-T with STATUS ON: aftertouch is off until this ke
 why Thor's aftertouch did nothing. Wheel Mode changed nothing in the tests (alone, twice, after MORPH
 ENABLE or MANUAL), so M.Morph's lamp bit (taken as 4, the one left) is not verified.
 The art has no Panel C; the panel view draws it in a 240 unit column left of LFO1, in the art's style.
+
+### Panel drawing cost (measured)
+
+`OB12_PAINT_STATS=1` prints the mean time of each part of a panel frame. Standalone player, 30 frames a
+second: 5.6 ms a frame, 5.4 ms of it the moving parts. Direct2D turns each vector band of a knob face
+or a cap into triangles on the CPU every time it is drawn; only the result goes to the GPU. Each
+moving part (and the data dial's dimple) is now drawn once into a sprite at twice the screen size,
+when the size changes, and a frame only places it, turned or moved: 0.5 ms a frame (moving 0.17 ms),
+the player 136.7 CPU seconds in 40 s against 146.7.

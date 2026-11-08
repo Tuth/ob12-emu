@@ -48,6 +48,10 @@ struct Moving {
     float lo = -135, hi = 135;  // knob: angles of its end marks, degrees clockwise from 12 o'clock
     float radius = 0;       // knob: its body's radius, art units
     float bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;  // slider: the cap's box at rest, art units
+    // The part drawn once at the current size: a frame only places it (Direct2D turns the vector
+    // bands into triangles on the CPU every time they are drawn: 5.4 ms of a 5.6 ms frame).
+    ID2D1Bitmap* sprite = nullptr;
+    float sx0 = 0, sy0 = 0, sx1 = 0, sy1 = 0;  // the sprite's box, art units
     bool found = false;
 };
 
@@ -360,6 +364,68 @@ struct PanelView::Impl {
     }
 
     // A control's moving parts at its value, drawn over the static art.
+    // Runs with their clip pairs, as the art stores them.
+    void draw_runs(ID2D1RenderTarget* t, const std::vector<int>& list, ID2D1SolidColorBrush* paint) {
+        std::vector<ID2D1Layer*> layers;
+        size_t depth = 0;
+        for (int r : list) {
+            const Run& run = runs[r];
+            if (run.mode == 4) {
+                if (depth == layers.size()) { ID2D1Layer* l = nullptr; t->CreateLayer(&l); layers.push_back(l); }
+                t->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), run.geometry), layers[depth++]);
+            } else if (run.mode == 5) {
+                if (depth) { t->PopLayer(); depth--; }
+            } else {
+                paint->SetColor(color(run.argb));
+                if (run.mode == 3) t->DrawGeometry(run.geometry, paint, run.width);
+                else fill(t, run, paint);
+            }
+        }
+        while (depth) { t->PopLayer(); depth--; }
+        for (auto* l : layers) l->Release();
+    }
+
+    // Each moving part into a sprite at twice the screen size (a turned knob keeps its edges).
+    void make_sprite(Moving& m, float scale) {
+        release(m.sprite);
+        if (!m.found || m.runs.empty()) return;
+        float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+        for (int r : m.runs) {
+            if (runs[r].points.empty()) continue;
+            float a, b, c, d;
+            box(runs[r], a, b, c, d);
+            x0 = std::min(x0, a); y0 = std::min(y0, b); x1 = std::max(x1, c); y1 = std::max(y1, d);
+        }
+        if (x1 <= x0) return;
+        const float pad = 1.f, k = scale * 2;
+        x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+        UINT32 w = (UINT32)ceilf((x1 - x0) * k), h = (UINT32)ceilf((y1 - y0) * k);
+        ID2D1BitmapRenderTarget* bt = nullptr;
+        if (FAILED(target->CreateCompatibleRenderTarget(D2D1::SizeF((float)w, (float)h), D2D1::SizeU(w, h),
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &bt))) return;
+        bt->SetDpi(96, 96);
+        ID2D1SolidColorBrush* paint = nullptr;
+        bt->CreateSolidColorBrush(D2D1::ColorF(0), &paint);
+        bt->BeginDraw();
+        bt->Clear(D2D1::ColorF(0, 0, 0, 0));
+        bt->SetTransform(D2D1::Matrix3x2F::Translation(-x0, -y0) * D2D1::Matrix3x2F::Scale(k, k));
+        draw_runs(bt, m.runs, paint);
+        bt->EndDraw();
+        bt->GetBitmap(&m.sprite);
+        m.sx0 = x0; m.sy0 = y0; m.sx1 = x1; m.sy1 = y1;
+        paint->Release();
+        bt->Release();
+    }
+    void make_sprites() {
+        float scale = art_scale();
+        for (Moving& m : moving) make_sprite(m, scale);
+        make_sprite(dial, scale);
+    }
+    void drop_sprites() {
+        for (Moving& m : moving) release(m.sprite);
+        release(dial.sprite);
+    }
+
     void draw_moving(float scale) {
         int count = sizeof panel_pots / sizeof panel_pots[0];
         ID2D1SolidColorBrush* paint = brush;
@@ -385,39 +451,13 @@ struct PanelView::Impl {
                 ? D2D1::Matrix3x2F::Translation(0, -value * m.travel)
                 : D2D1::Matrix3x2F::Rotation(m.lo + value * (m.hi - m.lo) - m.rest, D2D1::Point2F(m.cx, m.cy));
             target->SetTransform(place * D2D1::Matrix3x2F::Scale(scale, scale) * shift());
-            size_t depth = 0;
-            for (int r : m.runs) {
-                const Run& run = runs[r];
-                if (run.mode == 4) {
-                    if (depth == live_layers.size()) { ID2D1Layer* l = nullptr; target->CreateLayer(&l); live_layers.push_back(l); }
-                    target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), run.geometry), live_layers[depth++]);
-                } else if (run.mode == 5) {
-                    if (depth) { target->PopLayer(); depth--; }
-                } else {
-                    paint->SetColor(color(run.argb));
-                    if (run.mode == 3) target->DrawGeometry(run.geometry, paint, run.width);
-                    else fill(target, run, paint);
-                }
-            }
-            while (depth) { target->PopLayer(); depth--; }
+            if (m.sprite) target->DrawBitmap(m.sprite, D2D1::RectF(m.sx0, m.sy0, m.sx1, m.sy1), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            else draw_runs(target, m.runs, paint);
         }
         if (dial.found) {  // the dial's dimple, turned by the encoder
             target->SetTransform(D2D1::Matrix3x2F::Rotation(dial_angle, D2D1::Point2F(dial.cx, dial.cy)) * D2D1::Matrix3x2F::Scale(scale, scale) * shift());
-            size_t depth = 0;
-            for (int r : dial.runs) {
-                const Run& run = runs[r];
-                if (run.mode == 4) {
-                    if (depth == live_layers.size()) { ID2D1Layer* l = nullptr; target->CreateLayer(&l); live_layers.push_back(l); }
-                    target->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), run.geometry), live_layers[depth++]);
-                } else if (run.mode == 5) {
-                    if (depth) { target->PopLayer(); depth--; }
-                } else {
-                    paint->SetColor(color(run.argb));
-                    if (run.mode == 3) target->DrawGeometry(run.geometry, paint, run.width);
-                    else fill(target, run, paint);
-                }
-            }
-            while (depth) { target->PopLayer(); depth--; }
+            if (dial.sprite) target->DrawBitmap(dial.sprite, D2D1::RectF(dial.sx0, dial.sy0, dial.sx1, dial.sy1), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            else draw_runs(target, dial.runs, paint);
         }
         target->SetTransform(shift());
     }
@@ -497,6 +537,7 @@ struct PanelView::Impl {
         layer->GetBitmap(&art);
         paint->Release();
         layer->Release();
+        make_sprites();
     }
 
     // Panel C, drawn in the art's style (cream frames and print, black keys) from the service
@@ -566,6 +607,7 @@ struct PanelView::Impl {
     }
 
     void drop_target() {
+        drop_sprites();
         for (auto* l : live_layers) l->Release();
         live_layers.clear();
         release(art); release(lcd); release(brush); release(target);
@@ -751,20 +793,28 @@ struct PanelView::Impl {
     float left() const { return roundf(panel_c_w * sx()); }
     D2D1::Matrix3x2F shift() const { return D2D1::Matrix3x2F::Translation(left(), 0); }
 
+    // study: OB12_PAINT_STATS prints the mean time of each part of a frame every 300 frames
+    double stat[6] = {}; long stat_frames = 0;
+    static double now_ms() { LARGE_INTEGER c, f; QueryPerformanceCounter(&c); QueryPerformanceFrequency(&f); return c.QuadPart * 1000.0 / f.QuadPart; }
     void paint() {
         make_target();
         if (!target) return;
+        static const bool stats = getenv("OB12_PAINT_STATS") != nullptr;
+        double t0 = stats ? now_ms() : 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
         target->BeginDraw();
         target->Clear(color(panel_blue));
         if (art) target->DrawBitmap(art);
         float s = sx();
         target->SetTransform(shift());  // all below in frame units from the art's origin; Panel C at x < 0
 
+        if (stats) t1 = now_ms();
         draw_lcd(s);
+        if (stats) t2 = now_ms();
 
         if (getenv("OB12_PANEL_BARE")) { target->EndDraw(); return; }  // study: the art alone, for finding controls
         // Caps and knob faces move with their values; a red mark only where the art had none found.
         draw_moving(art_scale());
+        if (stats) { target->Flush(); t3 = now_ms(); }
         // Lamps: lit from the Master's LED latches. A soft glow, then the lamp, then a highlight.
         uint8_t latches[16];
         engine.leds(latches);
@@ -800,7 +850,17 @@ struct PanelView::Impl {
             target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(k.x * s, k.y * s), 21 * s, 12 * s), brush);
         }
         target->SetTransform(D2D1::Matrix3x2F::Identity());
+        if (stats) t4 = now_ms();
         if (target->EndDraw() == D2DERR_RECREATE_TARGET) drop_target();
+        if (stats) {
+            double t5 = now_ms();
+            stat[0] += t1 - t0; stat[1] += t2 - t1; stat[2] += t3 - t2; stat[3] += t4 - t3; stat[4] += t5 - t4; stat[5] += t5 - t0;
+            if (++stat_frames == 300) {
+                fprintf(stderr, "paint ms: art %.2f lcd %.2f moving %.2f lamps %.2f end %.2f total %.2f\n",
+                        stat[0] / 300, stat[1] / 300, stat[2] / 300, stat[3] / 300, stat[4] / 300, stat[5] / 300);
+                memset(stat, 0, sizeof stat); stat_frames = 0;
+            }
+        }
     }
 
     void set_pot(int i, int value) {
