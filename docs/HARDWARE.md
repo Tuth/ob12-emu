@@ -2284,3 +2284,9 @@ have spoiled any saved program with an F0 byte in a low half word. References un
   ALL: 2192 messages, 133507 bytes in 225 s, so the whole takes over half an hour. `Engine::sysex_sent`
   keeps MIDI OUT's system exclusive; the panel menu saves it as .syx; it goes back through "Load .syx".
 - LCD colours from Thor's photo: blue-white backlight, blue-violet dots.
+- Thor's VSTHost load of a programs dump (wc_olo_garb_ob12_programs1.syx, the same format) stopped at
+  "Waiting for MIDI data". Reproduced with MIDI clock on the input (SEQ_CLOCK, F8 every 21 ms as
+  VSTHost sends): the sender waited for an empty MIDI input before each message, and the clock never
+  let it empty, so only the start marker went out. The gap now runs from the message's own line time
+  (320 us a byte) and ignores other input. Measured with the clock running: 970 messages, 20225 words,
+  A-001 "INIT" from the file after the reset. The firmware itself takes F8 between the messages.

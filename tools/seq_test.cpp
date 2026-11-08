@@ -50,7 +50,10 @@ int main(int argc, char** argv) {
     long frames = (long)(seconds * 48000), done = 0;
     std::vector<int32_t> audio(frames * 2 + 960);
     size_t next = 0;
+    bool clock = getenv("SEQ_CLOCK") != nullptr;  // MIDI clock every 21 ms from 1 s, as VSTHost sends
+    long clock_next = 48000;
     while (done < frames) {
+        if (clock && done >= clock_next) { uint8_t f8 = 0xf8; e.midi(&f8, 1); clock_next += 1008; }
         while (next < events.size() && events[next].frame <= done) {
             const Event& ev = events[next++];
             if (ev.kind == 0) { uint8_t m[3] = {0x90, (uint8_t)ev.a, 0x64}; e.midi(m, 3); }
@@ -59,8 +62,10 @@ int main(int argc, char** argv) {
             else if (ev.kind == 3) e.set_pot(ev.a, ev.b, ev.c);
             else if (ev.kind == 7) e.midi(ev.bytes, ev.count);
             else if (ev.kind == 8) {
-                std::ifstream f(syx_files[ev.a], std::ios::binary);
-                std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), {});
+                std::vector<uint8_t> data;  // through the plug-in's own reader (.syx or .mid)
+                std::string path = syx_files[ev.a];
+                std::string problem = Engine::read_sysex(std::wstring(path.begin(), path.end()), data);
+                if (!problem.empty()) fprintf(stderr, "read_sysex: %s\n", problem.c_str());
                 fprintf(stderr, "syx %s: %zu bytes at %.2f s\n", syx_files[ev.a].c_str(), data.size(), ev.frame / 48000.0);
                 e.send_sysex(data.data(), (int)data.size());
             }

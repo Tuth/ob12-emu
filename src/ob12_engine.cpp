@@ -198,14 +198,16 @@ struct Engine::Impl {
     std::deque<std::vector<u8>> sysex_queue;
     long sysex_next = 0, sysex_gap = 9600;
     std::atomic<int> sysex_left{0};
+    // The next message waits for this one's own time on the line (320 us a byte at 31250 baud) and
+    // the gap. Waiting for an empty input instead starved it: the host's MIDI clock (F8 every 21 ms
+    // in VSTHost) kept the input busy, and the update stopped at "Waiting for MIDI data".
     void sysex_step() {  // every millisecond, after the inputs
-        if (sysex_queue.empty()) return;
-        if (!m->midi_idle()) { sysex_next = k + sysex_gap; return; }
-        if (k < sysex_next) return;
-        m->midi_in(sysex_queue.front());
+        if (sysex_queue.empty() || k < sysex_next) return;
+        const std::vector<u8>& message = sysex_queue.front();
+        m->midi_in(message);
+        sysex_next = k + (long)(message.size() * 30.72) + sysex_gap;
         sysex_queue.pop_front();
         sysex_left.store((int)sysex_queue.size(), std::memory_order_relaxed);
-        sysex_next = k + sysex_gap;
     }
 
     // The unit's memory: see set_flash_file in ob12_engine.h.
