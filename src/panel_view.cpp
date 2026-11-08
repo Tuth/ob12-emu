@@ -908,13 +908,18 @@ struct PanelView::Impl {
         case WM_LBUTTONUP: self->mouse_up(); return 0;
         case WM_RBUTTONUP: self->scale_menu(lparam); return 0;
         case WM_COMMAND: {
+            // Only our own menu's commands (lParam 0, not a control's notification): a host's command
+            // reaching this window must not be taken for a size or a gain.
+            if (lparam != 0 || HIWORD(wparam) != 0) break;
             int percent = (int)LOWORD(wparam) - scale_command;
             if (LOWORD(wparam) == syx_command) { self->load_sysex(); return 0; }
             if (LOWORD(wparam) == factory_command) { self->reset_memory(); return 0; }
             if (LOWORD(wparam) == dump_command) { self->save_dump(); return 0; }
             if (LOWORD(wparam) >= gain_command && LOWORD(wparam) <= gain_command + 24) { write_gain(LOWORD(wparam) - gain_command); return 0; }
             if (LOWORD(wparam) == shot_command) { if (const char* path = getenv("OB12_PANEL_SHOT")) self->save_image(path); return 0; }
-            if (percent > 0 && percent <= 400 && self->width_request) self->width_request(PanelView::base_width * percent / 100);
+            bool listed = false;
+            for (int p : scale_percents) listed |= p == percent;
+            if (listed && self->width_request) self->width_request(PanelView::base_width * percent / 100);
             return 0;
         }
         case WM_MOUSEWHEEL: {
