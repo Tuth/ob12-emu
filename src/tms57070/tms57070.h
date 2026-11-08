@@ -25,6 +25,7 @@ struct Options {
     // study: 1 = the output shift travels with the product (shift at the end of the word that made it),
     // 2 = the shift in effect at the start of that word; 0 = applied when the MAC is read (old model)
     int shift_with_product = 0;
+    int shift_paths = 3;  // with shift_with_product: 1 = stores and port writes, 2 = ALU and accumulator loads
     unsigned late_mode_mask = 0xf;   // which of 28, 29, 2A, 2B (bits 0-3) act late, with late_mode_change
     bool queued_pointer_load = false;  // secondaries 04-06, 08, 09 land two steps later, like C1-C5
     bool maclo_unsigned = false;     // primary 43 takes the low MAC word as unsigned
@@ -70,8 +71,8 @@ public:
 
     int32_t mac_upper(int64_t value) const { return mac_upper_s(value, output_shift()); }
     int32_t mac_upper_s(int64_t value, int shift) const;
-    int32_t upper_d2(int unit) const { return mac_upper_s(mac_d2[unit], options.shift_with_product ? shift_d2[unit] : output_shift()); }
-    uint32_t lower_d2(int unit) const { return mac_lower_s(mac_d2[unit], options.shift_with_product ? shift_d2[unit] : output_shift()); }
+    int32_t upper_d2(int unit, int path = 1) const { return mac_upper_s(mac_d2[unit], options.shift_with_product && (options.shift_paths & path) ? shift_d2[unit] : output_shift()); }
+    uint32_t lower_d2(int unit) const { return mac_lower_s(mac_d2[unit], options.shift_with_product && (options.shift_paths & 1) ? shift_d2[unit] : output_shift()); }
     uint32_t mac_lower(int64_t value) const { return mac_lower_s(value, output_shift()); }
     uint32_t mac_lower_s(int64_t value, int shift) const;
 

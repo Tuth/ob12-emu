@@ -204,6 +204,7 @@ int main(int argc, char** argv) {
     options.noise_generator = getenv("OB12_NO_NOISE") == nullptr;
     options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
     if (const char* m = getenv("OB12_SHIFT_PRODUCT")) options.shift_with_product = atoi(m);  // study
+    if (const char* m = getenv("OB12_SHIFT_PATHS")) options.shift_paths = atoi(m);  // study
     if (const char* m = getenv("OB12_LATE_MASK")) options.late_mode_mask = (unsigned)strtol(m, nullptr, 16);  // study
     options.compare_3e = getenv("OB12_NO_3E") == nullptr;
     options.bus_sum_saturates = getenv("OB12_BUS_WRAP") == nullptr;

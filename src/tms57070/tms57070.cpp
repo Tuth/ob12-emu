@@ -146,7 +146,7 @@ void Core::load_acc(uint32_t word, int operation) {
     case 0: value = dmem[dmem_operand(word)]; break;
     case 1: value = cmem[cmem_operand(word)]; break;
     case 2: value = acc[flag8]; break;
-    case 3: value = upper_d2(flag8); break;
+    case 3: value = upper_d2(flag8, 2); break;
     }
     switch (operation) {
     case OpLoadUnsigned: if (value < 0) value = -value; break;
@@ -168,7 +168,7 @@ void Core::alu(uint32_t word, int operation) {
     } else {
         int source = top & 3;
         lhs = source < 2 ? dmem[dmem_operand(word)] : cmem[cmem_operand(word)];
-        rhs = (source & 1) ? upper_d2(flag8) : acc[flag8];
+        rhs = (source & 1) ? upper_d2(flag8, 2) : acc[flag8];
     }
     if (operation == OpAdd || operation == OpSub || operation == OpCmp) alu_last = u24(lhs);
     int64_t result = 0;
@@ -704,7 +704,8 @@ void Core::step() {
     for (int unit = 0; unit < 2; unit++) {
         mac_d2[unit] = mac_d1[unit];
         mac_d1[unit] = mac[unit];
-        shift_d2[unit] = shift_d1[unit];
+        // 1: the shift at the end of the product's word; 2: at its start; 3: one word later.
+        shift_d2[unit] = options.shift_with_product == 3 ? output_shift() : shift_d1[unit];
         shift_d1[unit] = options.shift_with_product == 2 ? shift_start : output_shift();
     }
 

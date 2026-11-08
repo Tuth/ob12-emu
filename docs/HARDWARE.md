@@ -2188,3 +2188,14 @@ The unit sits between: clean programs about 12 dB above ours, A-015 about 4 dB o
 the three simple rules gives that, so the real rule is something else, perhaps different for the
 paths that store (02, 03) and the paths that add (alu with the MAC). Defaults are unchanged and the
 references stand; the options are study switches.
+
+Follow up. The TMS57070 wiki (Architecture, CR1 byte 1) confirms the fields: MRDM bits 9-11 rounding,
+MOSM 12-13 output shift (none, <<2, <<4, >>8), MASM 14-15 accumulation shift, and says the MAC has
+"an output shifter, and two 52-bit output registers": the shift is applied on the way into the
+output registers, not when they are read. It gives no pipeline timing. Measured variants
+(`OB12_SHIFT_PRODUCT`, `OB12_SHIFT_PATHS` 1 = stores and port writes, 2 = ALU and loads):
+- shift of the product's own word (1, 2), any path split: everything near 0 dBFS, clipping;
+- shift one word after the product (3): identical to the model now, -25.3 / -16.9.
+So no single global rule reproduces the unit's balance. The next step is per word: list the voice
+and overdrive words where a shift change falls between a product and its read, and see which reading
+of each keeps the envelope and LFO paths sane while moving the voice level.
