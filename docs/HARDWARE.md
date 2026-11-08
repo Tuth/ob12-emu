@@ -2199,3 +2199,23 @@ output registers, not when they are read. It gives no pipeline timing. Measured 
 So no single global rule reproduces the unit's balance. The next step is per word: list the voice
 and overdrive words where a shift change falls between a product and its read, and see which reading
 of each keeps the envelope and LFO paths sane while moving the voice level.
+
+Per word (`OB12_SHIFT_MISMATCH=1` lists the reads whose shift differs from their product's word;
+`OB12_SHIFT_PCS=chip:pc,...` takes the product's shift only there, chip 9 = the four voice chips).
+25 such words per voice chip, 11 on DASP4. One word at a time, A-001 / A-015 dBFS, model now -25.3 /
+-16.9:
+- voice words 014, 01E, 02C, 03A, 0B1 change the sound drastically (A-001 -47, A-015 -48, silence,
+  -35): envelope and LFO paths that only make sense with the shift taken when the MAC is read, as now;
+  01D clips; the rest change nothing or a little (0AE -24.5 / -12.5, 121 -27.2 / -15.8);
+- DASP4 06E, 1A6, 1BC, 1FE each raise both programs by about 8 dB (-17.2 / -7.6), the ratio unchanged;
+  133 raises only A-015 (+12 dB), the wrong way.
+So the words that work today are evidence for the read time rule, and no single word moves the clean
+programs up against the overdrive. The shift timing is not where the balance goes wrong.
+
+Reading the video again by program rather than by median: before A-015 (6:20-6:50, A-014 most likely)
+about -18.5, A-015 -15.4, so about 3 dB; ours A-014 -20.1, A-015 -13.4 with chords, 6.7 dB. The
+overdrive is a few dB high against A-014, not 13: the median comparison mixed in knob sweeps and quiet
+passages. What stays is the absolute level, -25 dBFS for one clean note, which the unit's analog
+output stage (DAC, op amps) may make up; its gain is not known from the firmware.
+Note: tms57070.h changed (study fields), so build_pgo.bat must run before the next engine or plug-in
+build.

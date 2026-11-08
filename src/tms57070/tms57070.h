@@ -71,8 +71,22 @@ public:
 
     int32_t mac_upper(int64_t value) const { return mac_upper_s(value, output_shift()); }
     int32_t mac_upper_s(int64_t value, int shift) const;
-    int32_t upper_d2(int unit, int path = 1) const { return mac_upper_s(mac_d2[unit], options.shift_with_product && (options.shift_paths & path) ? shift_d2[unit] : output_shift()); }
-    uint32_t lower_d2(int unit) const { return mac_lower_s(mac_d2[unit], options.shift_with_product && (options.shift_paths & 1) ? shift_d2[unit] : output_shift()); }
+    // study: per program address, how often a read sees a shift other than the one of its product's word
+    mutable long shift_mismatch[512] = {};
+    mutable uint32_t product_pc_d1[2] = {}, product_pc_d2[2] = {};
+    std::vector<int> shift_pcs;  // study: product-time shift only for reads at these addresses (empty: all)
+    bool product_shift_here(int path) const {
+        if (!options.shift_with_product || !(options.shift_paths & path)) return false;
+        if (shift_pcs.empty()) return true;
+        int here = (pc - 1) & 0x1ff;
+        for (int p : shift_pcs) if (p == here) return true;
+        return false;
+    }
+    int32_t upper_d2(int unit, int path = 1) const {
+        if (shift_d2[unit] != output_shift()) shift_mismatch[(pc - 1) & 0x1ff]++;
+        return mac_upper_s(mac_d2[unit], product_shift_here(path) ? shift_d2[unit] : output_shift());
+    }
+    uint32_t lower_d2(int unit) const { return mac_lower_s(mac_d2[unit], product_shift_here(1) ? shift_d2[unit] : output_shift()); }
     uint32_t mac_lower(int64_t value) const { return mac_lower_s(value, output_shift()); }
     uint32_t mac_lower_s(int64_t value, int shift) const;
 

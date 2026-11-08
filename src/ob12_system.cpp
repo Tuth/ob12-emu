@@ -246,6 +246,17 @@ int main(int argc, char** argv) {
     tms::Options options4 = options;
     if (!getenv("OB12_XMEM_CR3")) options4.xmem_words = 0x20000;
     for (int n = 0; n < 5; n++) host[n].dsp = new tms::Core(n == 4 ? options4 : options);
+    // study: OB12_SHIFT_PCS=chip:pc,pc,... product-time shift (OB12_SHIFT_PRODUCT) only for reads there
+    if (const char* t = getenv("OB12_SHIFT_PCS")) {
+        int chip = atoi(t);
+        for (int n = 0; n < 5; n++) host[n].dsp->shift_pcs.push_back(-1);  // a chip not named keeps the old rule
+        const char* c = strchr(t, ':');
+        while (c && *++c) {  // chip 9: the four voice chips
+            int at = (int)strtol(c, (char**)&c, 16);
+            for (int n = 0; n < 5; n++) if (n == chip || (chip == 9 && n < 4)) host[n].dsp->shift_pcs.push_back(at);
+            if (*c != ',') break;
+        }
+    }
     double clock = 0;
     FILE* host_log = getenv("OB12_HOST_LOG") ? fopen(getenv("OB12_HOST_LOG"), "w") : nullptr;
     FILE* port_log = getenv("OB12_PORT_LOG") ? fopen("build/ports.raw", "wb") : nullptr;
@@ -826,6 +837,8 @@ int main(int argc, char** argv) {
     m->lcd.save_pbm("build/lcd.pbm");
     m->save_hot("build/hot.txt");
     m->save_ram("build/ram.bin");
+    if (getenv("OB12_SHIFT_MISMATCH")) for (int n = 0; n < 5; n++) for (int i = 0; i < 512; i++)
+        if (host[n].dsp->shift_mismatch[i]) printf("mismatch DASP%d %03X %08X x%ld\n", n, i, host[n].dsp->pmem[i], host[n].dsp->shift_mismatch[i]);
     if (pcr_chip >= 0) for (int i = 0; i < 512; i++) if (pcr_n[i])
         printf("pcrms %03X %08X D %.4f A0 %.4f A1 %.4f AX %.4f\n", i, host[pcr_chip].dsp->pmem[i], sqrt(pcr_d[i] / pcr_n[i]), sqrt(pcr_a0[i] / pcr_n[i]), sqrt(pcr_a1[i] / pcr_n[i]), sqrt(pcr_ax[i] / pcr_n[i]));
     return 0;
