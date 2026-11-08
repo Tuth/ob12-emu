@@ -2259,4 +2259,12 @@ Factory programs (12prgFS from the presets zip): start marker twice, ". Updating
 version, size 9E00 (the 40448 byte factory file), 964 records, end marker. Measured: from the first
 message all LEDs go dark (the updating mode); nothing is written while the records arrive; after the
 end the firmware erases D0000 and writes 0x1332 bytes, equal to the factory image, then stops: the
-rest of the sector stays FF. Open: why it stops after 4914 bytes (a buffer, a check, a timing).
+rest of the sector stays FF.
+
+Solved, a fault of our flash model (`OB12_FLASH_LOG`, new: every bus write to the flash with PC):
+the firmware's flash routine (in RAM, ED141F-ED1445) programmed word by word to D1332, whose word is
+F0 00. The model took any F0 on an even address as the reset command, also as the data of a word
+program, so that word stayed FF and the firmware's read back stopped it. F0 is data in the program
+state now. Measured after the fix: 20225 words written, D0000 equal to the factory file byte for
+byte, the machine resets and comes back to PLAY PROGRAM with a clean display. The same fault would
+have spoiled any saved program with an F0 byte in a low half word. References unchanged (8cecf664).

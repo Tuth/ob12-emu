@@ -528,7 +528,9 @@ private:
 
     // 29F800T in word mode, sheet 03/15. Commands complete at once, so status polls see done.
     // Word address 5555/2AAA appear as byte address AAAA/5554 because A0 is unconnected.
+    FILE* flash_log = getenv("OB12_FLASH_LOG") ? fopen(getenv("OB12_FLASH_LOG"), "w") : nullptr;  // study
     void flash_write(u32 offset, u8 data) {
+        if (flash_log) fprintf(flash_log, "%.6f pc %06X %05X %02X state %d\n", cycles_total / 16e6, pc, offset, data, flash_state);
         if (flash_high) {  // second byte of a word program
             flash_high = false;
             flash[offset] &= data;
@@ -537,7 +539,9 @@ private:
         }
         if (offset & 1) return;  // high byte of a command word
         u32 low = offset & 0xffff;
-        if (data == 0xf0) { flash_state = 0; return; }
+        // F0 is the reset command only outside a word program: there it is data. Taking it as reset
+        // dropped every program word whose low byte is F0 (the factory programs stopped at D1332).
+        if (data == 0xf0 && flash_state != 6) { flash_state = 0; return; }
         switch (flash_state) {
         case 0: case 3: flash_state = (low == 0xaaaa && data == 0xaa) ? flash_state + 1 : 0; break;
         case 1: case 4: flash_state = (low == 0x5554 && data == 0x55) ? flash_state + 1 : 0; break;
