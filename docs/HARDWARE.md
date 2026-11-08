@@ -2301,3 +2301,15 @@ it off; Aftertouch opens AFTER-T with STATUS ON: aftertouch is off until this ke
 why Thor's aftertouch did nothing. Wheel Mode changed nothing in the tests (alone, twice, after MORPH
 ENABLE or MANUAL), so M.Morph's lamp bit (taken as 4, the one left) is not verified.
 The art has no Panel C; the panel view draws it in a 240 unit column left of LFO1, in the art's style.
+
+### The overdrive's own settings on A-015 (measured)
+
+EDIT OVERDRIVE (Level/Parameter, then the Overdrive key; pressing it toggles BYPASSED / INSERTED):
+A-015 "Edy's Lead" stores DRIVE 64, TYPE BOOSTED 1, HI-DAMP 4K, LEVEL 100, the panel knob on TYPE.
+LEVEL goes out as `A8 10 v` and lands in DASP4 C125 through a ramp; v 127 (LEVEL 100) 07FFFF, the
+same 1/16 top as the voices' C126; then about 0.9 dB a step: v 107 -16.7 dB under the top, v 89
+-30.9, v 69 -42.3, v 36 -65.3, v 3 and below silent. So the program runs the overdrive at its
+maximum level by the firmware's own table, and the parameter path (message, cell, curve) is sound.
+The remaining difference to the video (A-014 to A-015: about 3 dB there, 6.7 here) has no fault left
+to point at in the level path; the drive stage itself was decoded earlier and follows the firmware's
+coefficients. Taken as it stands; the plug-in's Output gain covers the overall level.
