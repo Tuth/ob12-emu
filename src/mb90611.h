@@ -1,5 +1,6 @@
 // Peripherals shared by the OB-12 Master and Slave MB90611A models.
 #pragma once
+#include <deque>
 #include "emu.h"
 #include <vector>
 
@@ -33,7 +34,7 @@ struct Uart {
     int tx_timer = 0, rx_timer = 0;
     long sent = 0;
     u8 rx_data = 0;
-    std::vector<u8> rx_queue;
+    std::deque<u8> rx_queue;  // a whole .syx can wait here: drained from the front
     std::vector<u8> head;
     void advance(int cycles) {
         if (tx_timer > 0 && (tx_timer -= cycles) <= 0) { tx_timer = 0; ssr |= 0x08; }

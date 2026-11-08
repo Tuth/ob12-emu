@@ -99,6 +99,12 @@ struct Instrument {
         if (GetFileAttributesA((rom + "\\12cpu152-CPU-v1.52-FINAL.bin").c_str()) == INVALID_FILE_ATTRIBUTES) return false;
         timeBeginPeriod(1);
         engine.reset(new Engine(rom));
+        // The unit's memory, one for every project, as on a unit: %LOCALAPPDATA%\OB12\flash.bin.
+        if (const char* base = getenv("LOCALAPPDATA")) {
+            std::string folder = std::string(base) + "\\OB12";
+            CreateDirectoryA(folder.c_str(), nullptr);
+            engine->set_flash_file(folder + "\\flash.bin");
+        }
         feeder = std::thread([this]() {
             std::vector<int32_t> block(240 * 2);
             while (!stop) {

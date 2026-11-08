@@ -1,6 +1,7 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <commdlg.h>
 #include <windowsx.h>
 #include <d2d1.h>
 #include <wincodec.h>
@@ -19,6 +20,7 @@
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "comdlg32.lib")
 
 namespace {
 
@@ -48,7 +50,9 @@ struct Moving {
 };
 
 constexpr int scale_command = 1000;  // menu id is this plus the percentage
-constexpr int shot_command = 1999;   // hidden: save the panel to OB12_PANEL_SHOT as PNG
+constexpr int shot_command = 1999;
+constexpr int syx_command = 1500;    // load a .syx or .mid into MIDI IN, as a sequencer would
+constexpr int factory_command = 1501;  // forget the stored memory   // hidden: save the panel to OB12_PANEL_SHOT as PNG
 constexpr int scale_percents[] = {50, 67, 75, 100, 125, 150, 200};
 
 D2D1_COLOR_F color(uint32_t argb) {
@@ -512,9 +516,11 @@ struct PanelView::Impl {
     }
 
     void scale_menu(LPARAM at) {
-        if (!width_request) return;
         HMENU menu = CreatePopupMenu();
-        for (int percent : scale_percents) {
+        AppendMenuW(menu, MF_STRING, syx_command, L"Load .syx / .mid into MIDI IN...");
+        AppendMenuW(menu, MF_STRING, factory_command, L"Reset memory to factory...");
+        if (width_request) AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        if (width_request) for (int percent : scale_percents) {
             wchar_t text[16];
             swprintf(text, 16, L"%d%%", percent);
             bool now = std::abs(width - PanelView::base_width * percent / 100) < 4;
@@ -524,6 +530,27 @@ struct PanelView::Impl {
         ClientToScreen(window, &p);
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, p.x, p.y, 0, window, nullptr);
         DestroyMenu(menu);
+    }
+
+    void load_sysex() {
+        wchar_t name[MAX_PATH] = {};
+        OPENFILENAMEW ofn = {sizeof ofn};
+        ofn.hwndOwner = window;
+        ofn.lpstrFilter = L"System exclusive (*.syx, *.mid)\0*.syx;*.mid\0All files\0*.*\0";
+        ofn.lpstrFile = name;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+        if (!GetOpenFileNameW(&ofn)) return;
+        std::vector<uint8_t> data;
+        std::string problem = Engine::read_sysex(name, data);
+        if (!problem.empty()) { MessageBoxA(window, problem.c_str(), "OB-12", MB_ICONWARNING); return; }
+        engine.send_sysex(data.data(), (int)data.size());
+    }
+    void reset_memory() {
+        if (MessageBoxW(window, L"Delete the stored memory (user programs, timbres, settings)?\n"
+                                L"The factory memory comes back the next time the plug-in loads.",
+                        L"OB-12", MB_OKCANCEL | MB_ICONWARNING) == IDOK)
+            engine.forget_flash();
     }
 
     // The LCD as a dot matrix, like the EII panel: every pixel a dot of the same size with a gap,
@@ -768,6 +795,8 @@ struct PanelView::Impl {
         case WM_RBUTTONUP: self->scale_menu(lparam); return 0;
         case WM_COMMAND: {
             int percent = (int)LOWORD(wparam) - scale_command;
+            if (LOWORD(wparam) == syx_command) { self->load_sysex(); return 0; }
+            if (LOWORD(wparam) == factory_command) { self->reset_memory(); return 0; }
             if (LOWORD(wparam) == shot_command) { if (const char* path = getenv("OB12_PANEL_SHOT")) self->save_image(path); return 0; }
             if (percent > 0 && percent <= 400 && self->width_request) self->width_request(PanelView::base_width * percent / 100);
             return 0;

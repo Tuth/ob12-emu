@@ -2237,3 +2237,26 @@ build.
 The plug-in now models it (`AnalogOut` in ob12_vst3.cpp): gain 2.375 and the two DC blocks; the low
 passes (about 0.5 dB at 20 kHz) are left out. The engine and its references are unchanged; the
 smoke test's rms went from 0.0216 to 0.0552.
+
+## The unit's memory and sysex loading
+
+No NVRAM: sheet 03/15 ties the SRAMs' CS2 straight to VCC, no battery. What lasts is the Master's
+29F800 flash. With a blank user area the firmware formats it at every boot (6 sector erases,
+196608 words: sectors 60000-B0000).
+
+- `Engine::set_flash_file`: the factory image stays in memory; at start the stored sectors replace
+  it; a second after the firmware stops writing flash, the sectors that differ from the factory
+  image are written (`OB12FLSH`, offset, size, data; through a temp file and rename), and at the end.
+  Measured: first boot 196614 writes, file 393272 bytes; second boot 0 writes, no format.
+- The plug-in keeps one memory for every project, as a unit: `%LOCALAPPDATA%\OB12\flash.bin`.
+  Panel menu: "Reset memory to factory" deletes it (the factory memory returns at the next load).
+- `Engine::send_sysex`: a .syx (or a .mid's F0 events, `Engine::read_sysex`) into MIDI IN one
+  message at a time, each after the previous has left the UART and 100 ms more, as the factory
+  .mid files are timed (about 76 ticks at 384 PPQ, 120 BPM). The UART queue is a deque now.
+  Panel menu: "Load .syx / .mid into MIDI IN".
+
+Factory programs (12prgFS from the presets zip): start marker twice, ". Updating Sect.[PROGRAM] .",
+version, size 9E00 (the 40448 byte factory file), 964 records, end marker. Measured: from the first
+message all LEDs go dark (the updating mode); nothing is written while the records arrive; after the
+end the firmware erases D0000 and writes 0x1332 bytes, equal to the factory image, then stops: the
+rest of the sector stays FF. Open: why it stops after 4914 bytes (a buffer, a check, a timing).

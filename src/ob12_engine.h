@@ -4,6 +4,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 
 class Engine {
 public:
@@ -13,7 +14,24 @@ public:
     // Runs the machine until n frames at 48 kHz are out. 24 bit values, left and right interleaved.
     void run(int32_t* frames, int n);
 
-    void midi(const uint8_t* bytes, int count);          // into the Master's MIDI input
+    void midi(const uint8_t* bytes, int count);          // into the Master's MIDI input  (31250 baud, a .syx whole)
+
+    // The Master's flash (29F800, 1 MB) is the unit's only memory that survives switching off:
+    // the SRAM has no battery. Call before the first run(): sectors stored in the file replace
+    // the factory image; after the firmware writes flash and goes quiet for a second, the
+    // sectors that differ from the factory image are saved there again, and at the end.
+    void set_flash_file(const std::string& path);
+    long flash_writes() const;                           // erases and words programmed so far
+
+    // A .syx (or the sysex of a .mid) as a sequencer plays it into MIDI IN: one message at a time,
+    // the next after the previous has gone out on the line and gap_ms has passed. The factory
+    // files carry about 100 ms between messages; the firmware writes flash in those gaps.
+    void send_sysex(const uint8_t* bytes, int count, int gap_ms = 100);
+    int sysex_waiting() const;                           // messages not yet sent
+    // The sysex of a .syx file, or of a Standard MIDI File's F0 events, as F0 ... F7 messages.
+    static std::string read_sysex(const std::wstring& path, std::vector<uint8_t>& out);
+    // Back to the factory memory: the stored flash is deleted and no longer written this session.
+    void forget_flash();
     void set_pot(int channel, int mux, int value);       // ADC channel 0-7, mux 0-7, value 0-255
     void key(int bar, int bit, bool down);               // button bar 0-11, BUT bit 0-7
     void turn(int detents);                              // data encoder

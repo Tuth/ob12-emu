@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <immintrin.h>
@@ -159,6 +160,9 @@ struct Engine::Impl {
     std::mutex input_lock;
     std::atomic<bool> input_waiting{false};
     std::vector<u8> midi_bytes;
+    std::vector<std::vector<u8>> pending_sysex;
+    int pending_gap = 100;
+    bool forget = false;
     struct KeyEvent { int bar, bit; bool down; };
     std::vector<KeyEvent> key_events;
     struct PotEvent { int channel, mux, value; };
@@ -171,12 +175,92 @@ struct Engine::Impl {
     uint8_t led_copy[16] = {};
     bool lcd_ready = false;
     std::atomic<bool> ready{false};
+
+    // send_sysex: messages waiting, and the half frame the next may go.
+    std::deque<std::vector<u8>> sysex_queue;
+    long sysex_next = 0, sysex_gap = 9600;
+    std::atomic<int> sysex_left{0};
+    void sysex_step() {  // every millisecond, after the inputs
+        if (sysex_queue.empty()) return;
+        if (!m->midi_idle()) { sysex_next = k + sysex_gap; return; }
+        if (k < sysex_next) return;
+        m->midi_in(sysex_queue.front());
+        sysex_queue.pop_front();
+        sysex_left.store((int)sysex_queue.size(), std::memory_order_relaxed);
+        sysex_next = k + sysex_gap;
+    }
+
+    // The unit's memory: see set_flash_file in ob12_engine.h.
+    std::string flash_path;
+    std::vector<u8> factory;
+    long flash_seen = 0, flash_changed_at = 0;
+    bool flash_dirty = false;
+    std::atomic<long> flash_count{0};
+
+    static void sector_of(u32 offset, u32& start, u32& size) {  // 29F800 top boot block map
+        if (offset >= 0xfc000) { start = 0xfc000; size = 0x4000; }
+        else if (offset >= 0xfa000) { start = 0xfa000; size = 0x2000; }
+        else if (offset >= 0xf8000) { start = 0xf8000; size = 0x2000; }
+        else if (offset >= 0xf0000) { start = 0xf0000; size = 0x8000; }
+        else { start = offset & 0xf0000; size = 0x10000; }
+    }
+    void load_flash() {
+        std::ifstream f(flash_path, std::ios::binary);
+        char magic[8];
+        if (!f.read(magic, 8) || memcmp(magic, "OB12FLSH", 8)) return;
+        uint32_t start, size;
+        while (f.read((char*)&start, 4) && f.read((char*)&size, 4)) {
+            if (start + size > m->flash.size()) break;
+            std::vector<char> data(size);
+            if (!f.read(data.data(), size)) break;
+            memcpy(m->flash.data() + start, data.data(), size);
+        }
+    }
+    void save_flash() {
+        if (flash_path.empty()) return;
+        std::string temp = flash_path + ".new";
+        {
+            std::ofstream f(temp, std::ios::binary | std::ios::trunc);
+            f.write("OB12FLSH", 8);
+            for (u32 at = 0; at < m->flash.size();) {
+                u32 start, size;
+                sector_of(at, start, size);
+                if (memcmp(m->flash.data() + start, factory.data() + start, size)) {
+                    f.write((const char*)&start, 4);
+                    f.write((const char*)&size, 4);
+                    f.write((const char*)m->flash.data() + start, size);
+                }
+                at = start + size;
+            }
+            if (!f) return;
+        }
+        MoveFileExA(temp.c_str(), flash_path.c_str(), MOVEFILE_REPLACE_EXISTING);
+        flash_dirty = false;
+    }
+    void watch_flash() {  // every millisecond, on the engine's thread
+        long now = m->flash_erases + m->flash_programs;
+        flash_count.store(now, std::memory_order_relaxed);
+        if (now != flash_seen) { flash_seen = now; flash_changed_at = k; flash_dirty = true; }
+        else if (flash_dirty && k - flash_changed_at > 96000) save_flash();
+    }
     long ready_at = 0;  // half frame the Slave had answered
 
     void take_inputs() {
         if (!input_waiting.exchange(false)) return;
         std::lock_guard<std::mutex> hold(input_lock);
         if (!midi_bytes.empty()) { m->midi_in(midi_bytes); midi_bytes.clear(); }
+        if (forget) {
+            forget = false;
+            if (!flash_path.empty()) DeleteFileA(flash_path.c_str());
+            flash_path.clear();
+            flash_dirty = false;
+        }
+        if (!pending_sysex.empty()) {
+            for (auto& message : pending_sysex) sysex_queue.push_back(std::move(message));
+            pending_sysex.clear();
+            sysex_gap = pending_gap * 96L;
+            sysex_left.store((int)sysex_queue.size(), std::memory_order_relaxed);
+        }
         for (auto& e : key_events) {
             u8 bit = (u8)(1 << e.bit);
             if (e.down) m->key_live[e.bar] |= bit; else m->key_live[e.bar] &= ~bit;
@@ -210,6 +294,8 @@ struct Engine::Impl {
             s->ppg_tick();
             s->reload_tick();
             take_inputs();
+            if (!flash_path.empty()) watch_flash();
+            sysex_step();
             if (k % 3072 == 0) {
                 std::lock_guard<std::mutex> hold(lcd_lock);
                 lcd_ready = m->lcd.bitmap(lcd_copy);
@@ -346,10 +432,82 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     });
 }
 
+void Engine::set_flash_file(const std::string& path) {
+    Impl& e = *impl;
+    e.flash_path = path;
+    e.factory = e.m->flash;
+    e.load_flash();
+    e.flash_seen = e.m->flash_erases + e.m->flash_programs;
+}
+
+void Engine::send_sysex(const uint8_t* bytes, int count, int gap_ms) {
+    std::vector<std::vector<u8>> messages;
+    for (int i = 0; i < count; i++) {
+        if (bytes[i] != 0xf0) continue;
+        int j = i;
+        while (j < count && bytes[j] != 0xf7) j++;
+        if (j >= count) break;
+        messages.emplace_back(bytes + i, bytes + j + 1);
+        i = j;
+    }
+    std::lock_guard<std::mutex> hold(impl->input_lock);
+    impl->pending_sysex.insert(impl->pending_sysex.end(), messages.begin(), messages.end());
+    impl->pending_gap = gap_ms;
+    impl->input_waiting = true;
+}
+
+void Engine::forget_flash() {
+    std::lock_guard<std::mutex> hold(impl->input_lock);
+    impl->forget = true;
+    impl->input_waiting = true;
+}
+
+std::string Engine::read_sysex(const std::wstring& path, std::vector<uint8_t>& out) {
+    std::ifstream f(path, std::ios::binary);
+    std::vector<uint8_t> b((std::istreambuf_iterator<char>(f)), {});
+    if (b.empty()) return "cannot read the file";
+    out.clear();
+    if (b.size() > 14 && !memcmp(b.data(), "MThd", 4)) {  // a Standard MIDI File: its F0 events
+        size_t pos = 8 + (b[4] << 24 | b[5] << 16 | b[6] << 8 | b[7]);
+        auto vlq = [&](size_t& p) { uint32_t v = 0; while (p < b.size()) { uint8_t c = b[p++]; v = v << 7 | (c & 0x7f); if (!(c & 0x80)) break; } return v; };
+        while (pos + 8 <= b.size()) {
+            size_t end = pos + 8 + (b[pos + 4] << 24 | b[pos + 5] << 16 | b[pos + 6] << 8 | b[pos + 7]);
+            bool track = !memcmp(&b[pos], "MTrk", 4);
+            pos += 8;
+            uint8_t running = 0;
+            while (track && pos < end && pos < b.size()) {
+                vlq(pos);
+                uint8_t status = b[pos];
+                if (status == 0xff) { pos += 2; uint32_t n = vlq(pos); pos += n; continue; }
+                if (status == 0xf0 || status == 0xf7) {
+                    pos++;
+                    uint32_t n = vlq(pos);
+                    if (status == 0xf0) out.push_back(0xf0);
+                    out.insert(out.end(), b.begin() + pos, b.begin() + std::min(b.size(), pos + n));
+                    pos += n;
+                    continue;
+                }
+                if (status & 0x80) { running = status; pos++; }
+                pos += (running & 0xf0) == 0xc0 || (running & 0xf0) == 0xd0 ? 1 : 2;
+            }
+            pos = end;
+        }
+    } else {
+        out = b;
+    }
+    if (std::count(out.begin(), out.end(), (uint8_t)0xf0) == 0) return "no system exclusive in the file";
+    return "";
+}
+
+int Engine::sysex_waiting() const { return impl->sysex_left.load(std::memory_order_relaxed); }
+
+long Engine::flash_writes() const { return impl->flash_count.load(std::memory_order_relaxed); }
+
 Engine::~Engine() {
     if (getenv("OB12_CLOCK_LOG")) printf("clock: %.6f s of sound, Master %.6f s, Slave %.6f s at 16 MHz, ready at %.4f s\n", impl->k / 96000.0, impl->m->cycles_total / 16e6, impl->s->cycles_total / 16e6, impl->ready_at / 96000.0);
     impl->stop = true;
     for (auto& t : impl->workers) t.join();
+    if (impl->flash_dirty) impl->save_flash();
     delete impl->m;
     delete impl->s;
     for (auto& h : impl->host) delete h.dsp;

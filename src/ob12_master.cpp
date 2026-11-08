@@ -277,6 +277,7 @@ public:
     }
     // Test input: queue bytes on the MIDI input.
     void midi_in(const std::vector<u8>& bytes) { uart[1].rx_queue.insert(uart[1].rx_queue.end(), bytes.begin(), bytes.end()); }
+    bool midi_idle() const { return uart[1].rx_queue.empty(); }  // every byte handed to the UART
     // Test input: raise external interrupts periodically.
     int int_period = 0, int_timer = 0;
     u8 int_mask = 0;
@@ -577,7 +578,11 @@ private:
         return s;
     }
 
-    std::vector<u8> flash, ram;
+public:  // the engine keeps the flash between sessions (the unit's only lasting memory)
+    std::vector<u8> flash;
+    long flash_erases = 0, flash_programs = 0;
+private:
+    std::vector<u8> ram;
     u8 internal[0x500];
     u8 io[0x100];
     ReloadTimer timer[2];
@@ -586,7 +591,6 @@ private:
     int adc_busy = 0, adc_channel = 0;
     int flash_state = 0;
     bool flash_high = false;
-    long flash_erases = 0, flash_programs = 0;
     u8 ics[16] = {};
     std::map<int, long> ei2os_count;
     std::vector<std::string> switches, jumps;

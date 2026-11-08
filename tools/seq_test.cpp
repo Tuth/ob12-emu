@@ -9,14 +9,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <string>
 #include <vector>
 
 struct Event { long frame; int kind, a, b, c; uint8_t bytes[256]; int count; };  // kind 0 on, 1 off, 2 encoder, 3 pot, 4 key down, 5 key up
 
 int main(int argc, char** argv) {
     Engine e(argv[1]);
+    if (const char* path = getenv("SEQ_FLASH")) e.set_flash_file(path);  // the unit's memory
     double seconds = atof(argv[2]);
     std::vector<Event> events;
+    std::vector<std::string> syx_files;
     for (int i = 4; i < argc; i++) {
         double t; char kind[8]; int a = 0, b = 0, c = 0;
         if (sscanf(argv[i], "%lf:%7[a-z]:%x:%d:%x", &t, kind, &a, &b, &c) < 2) continue;
@@ -25,6 +28,11 @@ int main(int argc, char** argv) {
         else if (!strcmp(kind, "enc")) { ev.kind = 2; sscanf(argv[i], "%lf:%7[a-z]:%d", &t, kind, &ev.a); }
         else if (!strcmp(kind, "pot")) { ev.kind = 3; sscanf(argv[i], "%lf:%7[a-z]:%d:%d:%x", &t, kind, &ev.a, &ev.b, &ev.c); }
         else if (!strcmp(kind, "dump")) ev.kind = 6;
+        else if (!strcmp(kind, "syx")) {  // t:syx:file  a whole .syx onto MIDI IN
+            ev.kind = 8;
+            syx_files.push_back(strchr(strchr(argv[i], ':') + 1, ':') + 1);
+            ev.a = (int)syx_files.size() - 1;
+        }
         else if (!strcmp(kind, "midi")) {
             ev.kind = 7;
             const char* hex = strchr(strchr(argv[i], ':') + 1, ':') + 1;
@@ -50,13 +58,21 @@ int main(int argc, char** argv) {
             else if (ev.kind == 2) e.turn(ev.a);
             else if (ev.kind == 3) e.set_pot(ev.a, ev.b, ev.c);
             else if (ev.kind == 7) e.midi(ev.bytes, ev.count);
-            else if (ev.kind == 6) { uint8_t l[16]; e.leds(l); printf("leds %.2f", ev.frame / 48000.0); for (int j = 0; j < 16; j++) printf(" %02X", l[j]); printf("|"); }
+            else if (ev.kind == 8) {
+                std::ifstream f(syx_files[ev.a], std::ios::binary);
+                std::vector<uint8_t> data((std::istreambuf_iterator<char>(f)), {});
+                fprintf(stderr, "syx %s: %zu bytes at %.2f s\n", syx_files[ev.a].c_str(), data.size(), ev.frame / 48000.0);
+                e.send_sysex(data.data(), (int)data.size());
+            }
+            else if (ev.kind == 6) { uint8_t l[16]; e.leds(l); printf("leds %.2f flash %ld sysex %d", ev.frame / 48000.0, e.flash_writes(), e.sysex_waiting()); for (int j = 0; j < 16; j++) printf(" %02X", l[j]); printf("|"); }
             else e.key(ev.a, ev.b, ev.kind == 4);
         }
         int n = (int)std::min<long>(240, frames - done);
         e.run(audio.data() + done * 2, n);
         done += n;
     }
+    fprintf(stderr, "sysex messages left %d\n", e.sysex_waiting());
+    if (getenv("SEQ_FLASH")) fprintf(stderr, "flash writes %ld\n", e.flash_writes());
     if (getenv("SEQ_LEDS")) {  // the LED latches at the end, hex
         uint8_t l[16];
         e.leds(l);
