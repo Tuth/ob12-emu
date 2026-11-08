@@ -71,6 +71,12 @@ int main(int argc, char** argv) {
         e.run(audio.data() + done * 2, n);
         done += n;
     }
+    if (const char* path = getenv("SEQ_DUMP")) {  // what MIDI OUT sent as system exclusive
+        std::vector<uint8_t> dump;
+        e.sysex_sent(&dump);
+        std::ofstream(path, std::ios::binary).write((const char*)dump.data(), dump.size());
+        fprintf(stderr, "dump %zu bytes\n", dump.size());
+    }
     fprintf(stderr, "sysex messages left %d\n", e.sysex_waiting());
     if (getenv("SEQ_FLASH")) fprintf(stderr, "flash writes %ld\n", e.flash_writes());
     if (getenv("SEQ_LEDS")) {  // the LED latches at the end, hex

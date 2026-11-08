@@ -32,6 +32,9 @@ public:
     static std::string read_sysex(const std::wstring& path, std::vector<uint8_t>& out);
     // Back to the factory memory: the stored flash is deleted and no longer written this session.
     void forget_flash();
+    // MIDI OUT's system exclusive since the last take, as F0 ... F7 messages: a bulk dump from
+    // SYSTEM, BULK DUMP lands here. With take, the bytes move into it and the store empties.
+    size_t sysex_sent(std::vector<uint8_t>* take = nullptr);
     void set_pot(int channel, int mux, int value);       // ADC channel 0-7, mux 0-7, value 0-255
     void key(int bar, int bit, bool down);               // button bar 0-11, BUT bit 0-7
     void turn(int detents);                              // data encoder

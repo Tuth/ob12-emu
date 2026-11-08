@@ -5,6 +5,7 @@
 #include "emu.h"
 #include "f2mc16.h"
 #include "mb90611.h"
+#include "t6963_cgrom.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -77,17 +78,34 @@ public:
             }
         }
     }
-    bool bitmap(u8* out) const {  // 240 x 64, 30 bytes a row
-        if (graphic_area != 30) return false;
-        for (int row = 0; row < 64; row++) for (int i = 0; i < 30; i++) out[row * 30 + i] = vram[(u16)(graphic_home + row * 30 + i)];
+    // 240 x 64, 30 bytes a row: the graphic layer and the text layer (the built in character ROM,
+    // 8 x 8 cells as the 30 byte graphic rows show the font width is 8), combined by the mode
+    // command (80: OR, 81: EXOR, 83: AND) as the display command (90-9F) turns them on.
+    // The updating procedure writes its page in text.
+    bool bitmap(u8* out) const {
+        bool graphic = (display & 0x08) || !(display & 0x0c), text = (display & 0x04) && text_area;
+        if (graphic_area != 30 && !text) return false;
+        for (int row = 0; row < 64; row++) for (int i = 0; i < 30; i++) {
+            u8 g = graphic && graphic_area == 30 ? vram[(u16)(graphic_home + row * 30 + i)] : 0;
+            if (text && i < text_area) {
+                u8 code = vram[(u16)(text_home + (row / 8) * text_area + i)];
+                u8 t = code < 0x80 ? t6963_cgrom[code * 8 + row % 8] : 0;  // 80-FF: CG RAM, not used here
+                switch (mode & 7) {
+                case 1: g ^= t; break;
+                case 3: g &= t; break;
+                default: g |= t; break;
+                }
+            }
+            out[row * 30 + i] = g;
+        }
         return true;
     }
     void save_pbm(const std::string& path) const {
-        if (!graphic_area) return;
+        u8 image[30 * 64];  // what the panel shows: both layers
+        if (!bitmap(image)) return;
         std::ofstream file(path, std::ios::binary);
-        file << "P4\n" << graphic_area * 8 << " 64\n";
-        for (int row = 0; row < 64; row++)
-            file.write((const char*)&vram[(u16)(graphic_home + row * graphic_area)], graphic_area);
+        file << "P4\n240 64\n";
+        file.write((const char*)image, sizeof image);
     }
     long writes = 0;
 
@@ -278,6 +296,7 @@ public:
     // Test input: queue bytes on the MIDI input.
     void midi_in(const std::vector<u8>& bytes) { uart[1].rx_queue.insert(uart[1].rx_queue.end(), bytes.begin(), bytes.end()); }
     bool midi_idle() const { return uart[1].rx_queue.empty(); }  // every byte handed to the UART
+    std::vector<u8>& midi_sent() { return uart[1].head; }  // MIDI OUT, for the engine to drain
     // Test input: raise external interrupts periodically.
     int int_period = 0, int_timer = 0;
     u8 int_mask = 0;

@@ -2268,3 +2268,19 @@ program, so that word stayed FF and the firmware's read back stopped it. F0 is d
 state now. Measured after the fix: 20225 words written, D0000 equal to the factory file byte for
 byte, the machine resets and comes back to PLAY PROGRAM with a clean display. The same fault would
 have spoiled any saved program with an F0 byte in a low half word. References unchanged (8cecf664).
+
+### Bulk dump both ways, the LCD's text layer (measured)
+
+- The LCD is a T6963C (Varitronix MGLS24064 datasheet). Our model drew only its graphic layer; the
+  UPDATE PROCEDURE page is written in its text layer with the built in character ROM, so during a
+  load the old page stayed with a garbled top line: it looked frozen (Thor's VSTHost screenshot).
+  The text layer is drawn now (30 x 8 cells of 8 x 8, combined by the mode command), with the
+  T6963C-0101 ROM as the standard 5x7 ASCII set (`src/t6963_cgrom.h`, from Adafruit-GFX's
+  glcdfont.c, BSD; the Toshiba datasheet table could not be fetched). Measured: "OBERHEIM-VISCOUNT
+  OB 12 / UPDATE PROCEDURE / . Updating Sect.[PROGRAM] . / > From dump OB 12 < / *****".
+- Bulk dump out: SYSTEM, 4-BULK DUMP, ENTER shows "MIDI BULK DUMP PROCEDURES / DUMPING / PLEASE WAIT
+  (10% COMPLETED)" and MIDI OUT carries the same format as the factory files: start marker, ". Updating
+  Sect.[ALL] .", "> From dump OB 12 <", size 53D94 (343444 bytes), records. At TX SPEED SLOW, SECTION
+  ALL: 2192 messages, 133507 bytes in 225 s, so the whole takes over half an hour. `Engine::sysex_sent`
+  keeps MIDI OUT's system exclusive; the panel menu saves it as .syx; it goes back through "Load .syx".
+- LCD colours from Thor's photo: blue-white backlight, blue-violet dots.

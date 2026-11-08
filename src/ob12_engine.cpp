@@ -176,6 +176,24 @@ struct Engine::Impl {
     bool lcd_ready = false;
     std::atomic<bool> ready{false};
 
+    // MIDI OUT: its system exclusive, kept for sysex_sent (a bulk dump).
+    mutable std::mutex out_lock;
+    std::vector<u8> sysex_out;
+    bool out_in_sysex = false;
+    void drain_out() {
+        auto& sent = m->midi_sent();
+        if (sent.empty()) return;
+        std::lock_guard<std::mutex> hold(out_lock);
+        for (u8 b : sent) {
+            if (b >= 0xf8) continue;  // real time bytes may sit inside a message
+            if (b == 0xf0) out_in_sysex = true;
+            else if (b & 0x80 && b != 0xf7) out_in_sysex = false;
+            if (out_in_sysex && sysex_out.size() < (16u << 20)) sysex_out.push_back(b);
+            if (b == 0xf7) out_in_sysex = false;
+        }
+        sent.clear();
+    }
+
     // send_sysex: messages waiting, and the half frame the next may go.
     std::deque<std::vector<u8>> sysex_queue;
     long sysex_next = 0, sysex_gap = 9600;
@@ -296,6 +314,7 @@ struct Engine::Impl {
             take_inputs();
             if (!flash_path.empty()) watch_flash();
             sysex_step();
+            drain_out();
             if (k % 3072 == 0) {
                 std::lock_guard<std::mutex> hold(lcd_lock);
                 lcd_ready = m->lcd.bitmap(lcd_copy);
@@ -497,6 +516,13 @@ std::string Engine::read_sysex(const std::wstring& path, std::vector<uint8_t>& o
     }
     if (std::count(out.begin(), out.end(), (uint8_t)0xf0) == 0) return "no system exclusive in the file";
     return "";
+}
+
+size_t Engine::sysex_sent(std::vector<uint8_t>* take) {
+    std::lock_guard<std::mutex> hold(impl->out_lock);
+    size_t n = impl->sysex_out.size();
+    if (take) { take->swap(impl->sysex_out); impl->sysex_out.clear(); }
+    return n;
 }
 
 int Engine::sysex_waiting() const { return impl->sysex_left.load(std::memory_order_relaxed); }

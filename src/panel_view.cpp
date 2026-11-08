@@ -52,7 +52,8 @@ struct Moving {
 constexpr int scale_command = 1000;  // menu id is this plus the percentage
 constexpr int shot_command = 1999;
 constexpr int syx_command = 1500;    // load a .syx or .mid into MIDI IN, as a sequencer would
-constexpr int factory_command = 1501;  // forget the stored memory   // hidden: save the panel to OB12_PANEL_SHOT as PNG
+constexpr int factory_command = 1501;  // forget the stored memory
+constexpr int dump_command = 1502;     // save what MIDI OUT sent as system exclusive (a bulk dump)   // hidden: save the panel to OB12_PANEL_SHOT as PNG
 constexpr int scale_percents[] = {50, 67, 75, 100, 125, 150, 200};
 
 D2D1_COLOR_F color(uint32_t argb) {
@@ -518,6 +519,10 @@ struct PanelView::Impl {
     void scale_menu(LPARAM at) {
         HMENU menu = CreatePopupMenu();
         AppendMenuW(menu, MF_STRING, syx_command, L"Load .syx / .mid into MIDI IN...");
+        size_t sent = engine.sysex_sent();
+        wchar_t dump_text[96];
+        swprintf(dump_text, 96, L"Save MIDI OUT sysex as .syx (%zu bytes)...", sent);
+        AppendMenuW(menu, MF_STRING | (sent ? 0 : MF_GRAYED), dump_command, dump_text);
         AppendMenuW(menu, MF_STRING, factory_command, L"Reset memory to factory...");
         if (width_request) AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         if (width_request) for (int percent : scale_percents) {
@@ -545,6 +550,21 @@ struct PanelView::Impl {
         std::string problem = Engine::read_sysex(name, data);
         if (!problem.empty()) { MessageBoxA(window, problem.c_str(), "OB-12", MB_ICONWARNING); return; }
         engine.send_sysex(data.data(), (int)data.size());
+    }
+    void save_dump() {
+        wchar_t name[MAX_PATH] = L"OB-12 dump.syx";
+        OPENFILENAMEW ofn = {sizeof ofn};
+        ofn.hwndOwner = window;
+        ofn.lpstrFilter = L"System exclusive (*.syx)\0*.syx\0";
+        ofn.lpstrFile = name;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrDefExt = L"syx";
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+        if (!GetSaveFileNameW(&ofn)) return;
+        std::vector<uint8_t> data;
+        engine.sysex_sent(&data);
+        std::ofstream f(name, std::ios::binary);
+        f.write((const char*)data.data(), data.size());
     }
     void reset_memory() {
         if (MessageBoxW(window, L"Delete the stored memory (user programs, timbres, settings)?\n"
@@ -597,7 +617,8 @@ struct PanelView::Impl {
             dot_cover(w, 240, fx, cx);
             dot_cover(h, 64, fy, cy);
             // A set bit is background. Gap, unlit dot and lit dot colours, R G B.
-            const float gap[3] = {0xd2, 0xde, 0xe8}, off[3] = {0xc4, 0xd2, 0xde}, on[3] = {0x10, 0x20, 0x3a};
+            // The unit's blue-white backlight with blue-violet dots (Thor's photo of the SYSTEM READY page).
+            const float gap[3] = {0xea, 0xec, 0xfa}, off[3] = {0xdc, 0xdf, 0xf4}, on[3] = {0x48, 0x46, 0xc0};
             lcd_pixels.assign((size_t)w * h, 0);
             for (int py = 0; py < h; py++) for (int px = 0; px < w; px++) {
                 float lit = 0, unlit = 0;
@@ -797,6 +818,7 @@ struct PanelView::Impl {
             int percent = (int)LOWORD(wparam) - scale_command;
             if (LOWORD(wparam) == syx_command) { self->load_sysex(); return 0; }
             if (LOWORD(wparam) == factory_command) { self->reset_memory(); return 0; }
+            if (LOWORD(wparam) == dump_command) { self->save_dump(); return 0; }
             if (LOWORD(wparam) == shot_command) { if (const char* path = getenv("OB12_PANEL_SHOT")) self->save_image(path); return 0; }
             if (percent > 0 && percent <= 400 && self->width_request) self->width_request(PanelView::base_width * percent / 100);
             return 0;
