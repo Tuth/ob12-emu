@@ -676,7 +676,7 @@ void Core::step() {
 
     pipeline();
     insn_cycles = 1;
-    int shift_start = output_shift();
+    int shift_start = study_shift ? output_shift() : 0;
 
     uint32_t top = word >> 24;
     if (top >= 0xc0) {
@@ -705,8 +705,10 @@ void Core::step() {
         mac_d2[unit] = mac_d1[unit];
         mac_d1[unit] = mac[unit];
         // 1: the shift at the end of the product's word; 2: at its start; 3: one word later.
-        shift_d2[unit] = options.shift_with_product == 3 ? output_shift() : shift_d1[unit];
-        shift_d1[unit] = options.shift_with_product == 2 ? shift_start : output_shift();
+        if (study_shift) {
+            shift_d2[unit] = options.shift_with_product == 3 ? output_shift() : shift_d1[unit];
+            shift_d1[unit] = options.shift_with_product == 2 ? shift_start : output_shift();
+        }
     }
 
     if (xmem_read_cycles != 0) {

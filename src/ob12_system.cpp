@@ -246,6 +246,8 @@ int main(int argc, char** argv) {
     tms::Options options4 = options;
     if (!getenv("OB12_XMEM_CR3")) options4.xmem_words = 0x20000;
     for (int n = 0; n < 5; n++) host[n].dsp = new tms::Core(n == 4 ? options4 : options);
+    if (getenv("OB12_SHIFT_PRODUCT") || getenv("OB12_SHIFT_MISMATCH") || getenv("OB12_SHIFT_PCS"))
+        for (auto& h : host) h.dsp->study_shift = true;  // the shift studies, off in the engine
     // study: OB12_SHIFT_PCS=chip:pc,pc,... product-time shift (OB12_SHIFT_PRODUCT) only for reads there
     if (const char* t = getenv("OB12_SHIFT_PCS")) {
         int chip = atoi(t);

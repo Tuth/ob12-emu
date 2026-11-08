@@ -82,11 +82,15 @@ public:
         for (int p : shift_pcs) if (p == here) return true;
         return false;
     }
+    // The study switches cost nothing when off: the plain read is the model (see "The voice level
+    // hangs on when the output shift takes effect" in docs/HARDWARE.md).
     int32_t upper_d2(int unit, int path = 1) const {
+        if (!study_shift) return mac_upper(mac_d2[unit]);
         if (shift_d2[unit] != output_shift()) shift_mismatch[(pc - 1) & 0x1ff]++;
         return mac_upper_s(mac_d2[unit], product_shift_here(path) ? shift_d2[unit] : output_shift());
     }
-    uint32_t lower_d2(int unit) const { return mac_lower_s(mac_d2[unit], product_shift_here(1) ? shift_d2[unit] : output_shift()); }
+    uint32_t lower_d2(int unit) const { return study_shift ? mac_lower_s(mac_d2[unit], product_shift_here(1) ? shift_d2[unit] : output_shift()) : mac_lower(mac_d2[unit]); }
+    bool study_shift = false;  // the shift studies are on: set by the harness (OB12_SHIFT_*)
     uint32_t mac_lower(int64_t value) const { return mac_lower_s(value, output_shift()); }
     uint32_t mac_lower_s(int64_t value, int shift) const;
 

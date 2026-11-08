@@ -423,6 +423,7 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     tms::Options options4 = options;
     options4.xmem_words = 0x20000;
     for (int n = 0; n < 5; n++) e.host[n].dsp = new tms::Core(n == 4 ? options4 : options);
+    if (getenv("OB12_STUDY_SHIFT")) for (auto& h : e.host) h.dsp->study_shift = true;  // to time its cost
     e.s->on_dsp_byte = [&e](u8 selected, u8 data) {
         for (int chip = 0; chip < 5; chip++) if (selected & (1 << chip)) e.held[e.filling][chip][e.half].push_back({data, false});
     };
