@@ -114,9 +114,10 @@ struct Instrument {
                 engine->run(block.data(), 240);
                 if (!ready) continue;
                 uint32_t w = written.load(std::memory_order_relaxed);
+                const float gain = PanelView::output_gain();  // the user's final gain, after the analog stage
                 for (int i = 0; i < 240; i++, w++) {
-                    ring[(w & (ring_size - 1)) * 2] = analog.run(0, block[i * 2] / 8388608.f);
-                    ring[(w & (ring_size - 1)) * 2 + 1] = analog.run(1, block[i * 2 + 1] / 8388608.f);
+                    ring[(w & (ring_size - 1)) * 2] = analog.run(0, block[i * 2] / 8388608.f) * gain;
+                    ring[(w & (ring_size - 1)) * 2 + 1] = analog.run(1, block[i * 2 + 1] / 8388608.f) * gain;
                 }
                 written.store(w, std::memory_order_release);
             }

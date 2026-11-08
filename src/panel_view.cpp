@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <windowsx.h>
+#include <atomic>
 #include <d2d1.h>
 #include <dwrite.h>
 #include <wincodec.h>
@@ -59,6 +60,7 @@ constexpr int scale_command = 1000;  // menu id is this plus the percentage
 constexpr int shot_command = 1999;
 constexpr int syx_command = 1500;    // load a .syx or .mid into MIDI IN, as a sequencer would
 constexpr int factory_command = 1501;  // forget the stored memory
+constexpr int gain_command = 1600;     // plus 0-24: output gain in dB
 constexpr int dump_command = 1502;     // save what MIDI OUT sent as system exclusive (a bulk dump)   // hidden: save the panel to OB12_PANEL_SHOT as PNG
 constexpr int scale_percents[] = {50, 67, 75, 100, 125, 150, 200};
 
@@ -70,6 +72,24 @@ D2D1_COLOR_F color(uint32_t argb) {
 const uint32_t panel_blue = 0xff2251b0, panel_cream = 0xffece5c6;
 
 const wchar_t* class_name = L"OB12PanelView";
+
+std::atomic<int> gain_db{-1};  // -1: not read yet
+std::string gain_file(bool make_folder) {
+    const char* base = getenv("LOCALAPPDATA");
+    if (!base) return "";
+    std::string folder = std::string(base) + "\\OB12";
+    if (make_folder) CreateDirectoryA(folder.c_str(), nullptr);
+    return folder + "\\output_gain.txt";
+}
+int read_gain() {
+    int db = 0;
+    if (FILE* f = fopen(gain_file(false).c_str(), "r")) { if (fscanf(f, "%d", &db) != 1) db = 0; fclose(f); }
+    return std::max(0, std::min(24, db));
+}
+void write_gain(int db) {
+    gain_db = db;
+    if (FILE* f = fopen(gain_file(true).c_str(), "w")) { fprintf(f, "%d\n", db); fclose(f); }
+}
 const UINT_PTR frame_timer = 1;
 
 }  // namespace
@@ -622,6 +642,16 @@ struct PanelView::Impl {
         swprintf(dump_text, 96, L"Save MIDI OUT sysex as .syx (%zu bytes)...", sent);
         AppendMenuW(menu, MF_STRING | (sent ? 0 : MF_GRAYED), dump_command, dump_text);
         AppendMenuW(menu, MF_STRING, factory_command, L"Reset memory to factory...");
+        HMENU gain = CreatePopupMenu();
+        int now_db = PanelView::output_gain_db();
+        for (int db = 0; db <= 24; db++) {
+            wchar_t text[16];
+            swprintf(text, 16, db ? L"+%d dB" : L"0 dB", db);
+            AppendMenuW(gain, MF_STRING | (db == now_db ? MF_CHECKED : 0), gain_command + db, text);
+        }
+        wchar_t gain_text[48];
+        swprintf(gain_text, 48, L"Output gain (now %ls%d dB)", now_db ? L"+" : L"", now_db);
+        AppendMenuW(menu, MF_POPUP, (UINT_PTR)gain, gain_text);
         if (width_request) AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         if (width_request) for (int percent : scale_percents) {
             wchar_t text[16];
@@ -942,6 +972,7 @@ struct PanelView::Impl {
             if (LOWORD(wparam) == syx_command) { self->load_sysex(); return 0; }
             if (LOWORD(wparam) == factory_command) { self->reset_memory(); return 0; }
             if (LOWORD(wparam) == dump_command) { self->save_dump(); return 0; }
+            if (LOWORD(wparam) >= gain_command && LOWORD(wparam) <= gain_command + 24) { write_gain(LOWORD(wparam) - gain_command); return 0; }
             if (LOWORD(wparam) == shot_command) { if (const char* path = getenv("OB12_PANEL_SHOT")) self->save_image(path); return 0; }
             if (percent > 0 && percent <= 400 && self->width_request) self->width_request(PanelView::base_width * percent / 100);
             return 0;
@@ -1017,6 +1048,13 @@ void PanelView::resize(int width, int height) {
     }
     InvalidateRect(impl->window, nullptr, FALSE);
 }
+
+int PanelView::output_gain_db() {
+    int db = gain_db.load();
+    if (db < 0) { db = read_gain(); gain_db = db; }
+    return db;
+}
+float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
 
 float PanelView::aspect() const { return impl->art_w * (1 + panel_c_w / panel_frame_w) / impl->art_h; }
 
