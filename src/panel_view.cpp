@@ -42,6 +42,8 @@ struct Moving {
     float rest = 0;         // knob: the art's pointer angle, degrees clockwise from 12 o'clock
     float travel = 0;       // slider: art units from value 0 to full
     float lo = -135, hi = 135;  // knob: angles of its end marks, degrees clockwise from 12 o'clock
+    float radius = 0;       // knob: its body's radius, art units
+    float bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;  // slider: the cap's box at rest, art units
     bool found = false;
 };
 
@@ -52,6 +54,9 @@ constexpr int scale_percents[] = {50, 67, 75, 100, 125, 150, 200};
 D2D1_COLOR_F color(uint32_t argb) {
     return D2D1::ColorF(((argb >> 16) & 255) / 255.f, ((argb >> 8) & 255) / 255.f, (argb & 255) / 255.f, (argb >> 24) / 255.f);
 }
+
+// The unit's colours, from Thor's photos: a royal blue panel, cream print, black knobs and keys.
+const uint32_t panel_blue = 0xff2251b0, panel_cream = 0xffece5c6;
 
 const wchar_t* class_name = L"OB12PanelView";
 const UINT_PTR frame_timer = 1;
@@ -110,6 +115,80 @@ struct PanelView::Impl {
                 int n = kind == 2 ? 3 : kind == 3 ? 0 : 1;
                 for (int j = 0; j < n * 2; j++) r.points.push_back(f32());
             }
+        }
+        fix_art();
+    }
+
+    // A gradient band (mode 1) is drawn without antialiasing: the bands then tile without the half
+    // transparent seams that let the blue panel through a knob or a cap.
+    static void fill(ID2D1RenderTarget* t, const Run& run, ID2D1Brush* paint) {
+        if (run.mode == 1) t->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+        t->FillGeometry(run.geometry, paint);
+        if (run.mode == 1) t->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    }
+
+    // The art is printed black on grey; the unit is cream on blue with black controls.
+    void recolour() {
+        const float k = art_w / panel_frame_w;
+        for (Run& r : runs) {
+            if (r.mode >= 4 || r.points.empty()) continue;
+            int cr = (r.argb >> 16) & 255, cg = (r.argb >> 8) & 255, cb = r.argb & 255;
+            if (std::abs(cr - cg) > 12 || std::abs(cg - cb) > 12) continue;  // LEDs and anything coloured
+            int v = (cr + cg + cb) / 3;
+            float x0, y0, x1, y1;
+            box(r, x0, y0, x1, y1);
+            float w = (x1 - x0) / k, h = (y1 - y0) / k;
+            int figures = (int)std::count(r.kinds.begin(), r.kinds.end(), (uint8_t)0);
+            uint32_t a = r.argb & 0xff000000;
+            if (r.argb == 0xff6d6e71 && r.mode == 2) { r.argb = a | 0xd6d6d4; continue; }  // a knob's pointer
+            if (r.argb == 0xffbcbec0 && r.mode == 2 && w < 30 && r.moving) { r.argb = a | 0xd6d6d4; continue; }  // its light fill
+            if (v > 0xf0 && figures == 1 && w < 1 && h > 40) { r.argb = a | 0x0c0c0e; continue; }  // a slot's highlight: black on the unit
+            if (v > 0xf0) { r.argb = a | 0xdcdcd8; continue; }
+            if (v < 0x40 && r.mode == 1 && !r.moving && w < 8 && h < 3) { r.argb = a | (panel_cream & 0xffffff); continue; }  // a slider's tick  // index lines and highlights on caps and knobs
+            if (v < 0x40 && r.mode != 1) {  // print; mode 1 is a gradient band, shading
+                if (r.mode == 3 && figures >= 60) { r.argb = a | 0x3a3a3c; continue; }  // a knob's knurled ring
+                bool plain_block = r.mode != 3 && r.kinds.size() <= 6 && (w > 40 || h > 40);  // slots, the LCD bezel
+                r.argb = plain_block ? (a | 0x0c0c0e) : (a | (panel_cream & 0xffffff));
+                continue;
+            }
+            int d = 0x12 + std::max(0, v - 0x30) * 30 / 100;  // greys of knobs, caps and keys, kept as shading on black
+            if (d > 0x58) d = 0x58;
+            r.argb = a | (uint32_t)(d << 16 | d << 8 | d);
+        }
+    }
+
+    // Two faults of the service drawing the art comes from (Thor's screenshots):
+    // - its numbered callouts sit outside the panel, their leader lines reach in: short ticks at the
+    //   edges, and one (x 1036) up to the Phrase REC key. A line that starts outside the panel is dropped.
+    // - the LFO1 frame has no top edge between its corners (frame units 40.5 to 186.1 at y 20.1).
+    void fix_art() {
+        const float k = art_w / panel_frame_w;
+        auto outside = [&](float x, float y) { return x < 0 || y < 0 || x > art_w || y > art_h; };
+        for (Run& r : runs) {
+            if (r.mode != 3) continue;
+            std::vector<uint8_t> kinds;
+            std::vector<float> points;
+            bool drop = false;
+            size_t q = 0;
+            for (uint8_t kind : r.kinds) {
+                int n = kind == 2 ? 3 : kind == 3 ? 0 : 1;
+                if (kind == 0) drop = outside(r.points[q], r.points[q + 1]);
+                if (!drop) {
+                    kinds.push_back(kind);
+                    points.insert(points.end(), r.points.begin() + q, r.points.begin() + q + n * 2);
+                }
+                q += n * 2;
+            }
+            r.kinds.swap(kinds);
+            r.points.swap(points);
+        }
+        for (Run& r : runs) {
+            // the frame line itself (width 0.49), not the thin twin drawn under its corners
+            if (r.mode != 3 || r.width < 0.4f || r.points.size() < 2) continue;
+            if (std::fabs(r.points[0] / k - 40.5f) > 0.5f || std::fabs(r.points[1] / k - 20.1f) > 0.5f) continue;
+            r.kinds.push_back(0); r.points.push_back(40.5f * k); r.points.push_back(20.1f * k);
+            r.kinds.push_back(1); r.points.push_back(186.1f * k); r.points.push_back(20.1f * k);
+            break;
         }
     }
 
@@ -206,6 +285,7 @@ struct PanelView::Impl {
                 float bx0, by0, bx1, by1;
                 box(runs[body], bx0, by0, bx1, by1);
                 float radius = (by1 - by0) / 2;  // the height: Bezier handles widen the box sideways
+                m.radius = radius;
                 double sx = 0, sy = 0;  // the face marks' fill centroid points where the knob points
                 long sn = 0;
                 for (int r = 0; r < (int)runs.size(); r++) {
@@ -259,6 +339,14 @@ struct PanelView::Impl {
                 }
             }
             std::sort(m.runs.begin(), m.runs.end());
+            if (p.slider) {
+                m.bx0 = m.by0 = 1e9f; m.bx1 = m.by1 = -1e9f;
+                for (int r : picked) {
+                    float x0, y0, x1, y1;
+                    box(runs[r], x0, y0, x1, y1);
+                    m.bx0 = std::min(m.bx0, x0); m.by0 = std::min(m.by0, y0); m.bx1 = std::max(m.bx1, x1); m.by1 = std::max(m.by1, y1);
+                }
+            }
             m.found = true;
             if (getenv("OB12_PANEL_DEBUG")) fprintf(stderr, "%-18s runs %3zu centre %.1f %.1f rest %.0f range %.0f..%.0f\n", p.name, m.runs.size(), m.cx / k, m.cy / k, m.rest, m.lo, m.hi);
         }
@@ -274,14 +362,13 @@ struct PanelView::Impl {
         for (int i = 0; i < count; i++) {
             const PanelPot& p = panel_pots[i];
             if (!p.slider || !moving[i].found) continue;
-            float top = p.y + 43.9f, bottom = p.y + 81;
-            paint->SetColor(D2D1::ColorF(0x231f20));
-            target->FillRectangle(D2D1::RectF((p.x - 0.9f) * f, (p.y + 43) * f, (p.x + 0.8f) * f, (bottom - 2.1f) * f), paint);
-            paint->SetColor(D2D1::ColorF(0x000202));
-            float w = std::max(0.5f, 1.01f * f);
-            target->DrawLine(D2D1::Point2F((p.x - 3.7f) * f, top * f), D2D1::Point2F((p.x - 3.7f) * f, bottom * f), paint, w);
-            target->DrawLine(D2D1::Point2F((p.x + 3.7f) * f, top * f), D2D1::Point2F((p.x + 3.7f) * f, bottom * f), paint, w);
-            target->DrawLine(D2D1::Point2F((p.x - 3.7f) * f, bottom * f), D2D1::Point2F((p.x + 3.7f) * f, bottom * f), paint, w);
+            // On the unit a slider is a plain black slit: cover the art's drawn slot frame (x +-3.7, the
+            // art's slot from y -43.7, carried down to the bottom tick) with the panel and lay the slit.
+            float top = p.y - 44.6f, bottom = p.y + 81;
+            paint->SetColor(color(panel_blue));
+            target->FillRectangle(D2D1::RectF((p.x - 5.2f) * f, top * f, (p.x + 5.2f) * f, (bottom + 0.9f) * f), paint);
+            paint->SetColor(color(0xff0c0c0e));
+            target->FillRectangle(D2D1::RectF((p.x - 0.9f) * f, (p.y - 43.6f) * f, (p.x + 0.8f) * f, (bottom - 2.1f) * f), paint);
         }
         for (int i = 0; i < count; i++) {
             const Moving& m = moving[i];
@@ -302,7 +389,7 @@ struct PanelView::Impl {
                 } else {
                     paint->SetColor(color(run.argb));
                     if (run.mode == 3) target->DrawGeometry(run.geometry, paint, run.width);
-                    else target->FillGeometry(run.geometry, paint);
+                    else fill(target, run, paint);
                 }
             }
             while (depth) { target->PopLayer(); depth--; }
@@ -320,7 +407,7 @@ struct PanelView::Impl {
                 } else {
                     paint->SetColor(color(run.argb));
                     if (run.mode == 3) target->DrawGeometry(run.geometry, paint, run.width);
-                    else target->FillGeometry(run.geometry, paint);
+                    else fill(target, run, paint);
                 }
             }
             while (depth) { target->PopLayer(); depth--; }
@@ -374,7 +461,7 @@ struct PanelView::Impl {
         ID2D1SolidColorBrush* paint = nullptr;
         layer->CreateSolidColorBrush(D2D1::ColorF(0), &paint);
         layer->BeginDraw();
-        layer->Clear(D2D1::ColorF(0.93f, 0.93f, 0.92f));
+        layer->Clear(color(panel_blue));
         float scale = std::min(width / art_w, height / art_h);
         layer->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale));
         std::vector<ID2D1Layer*> clips;
@@ -394,7 +481,7 @@ struct PanelView::Impl {
             } else {
                 paint->SetColor(color(r.argb));
                 if (r.mode == 3) layer->DrawGeometry(r.geometry, paint, r.width);
-                else layer->FillGeometry(r.geometry, paint);
+                else fill(layer, r, paint);
             }
         }
         layer->EndDraw();
@@ -559,7 +646,7 @@ struct PanelView::Impl {
         make_target();
         if (!target) return;
         target->BeginDraw();
-        target->Clear(D2D1::ColorF(0.93f, 0.93f, 0.92f));
+        target->Clear(color(panel_blue));
         if (art) target->DrawBitmap(art);
         float s = sx();
 
@@ -702,6 +789,7 @@ PanelView::PanelView(Engine& engine, const std::string& art_file) : impl(new Imp
     impl->load(art_file);
     impl->find_moving();
     impl->find_dial();
+    impl->recolour();  // after the finders: they know the parts by the art's own colours
     impl->build_geometry();
 }
 
