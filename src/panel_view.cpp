@@ -4,6 +4,7 @@
 #include <commdlg.h>
 #include <windowsx.h>
 #include <d2d1.h>
+#include <dwrite.h>
 #include <wincodec.h>
 #include <algorithm>
 #include <cstdio>
@@ -18,6 +19,7 @@
 #include "panel_controls.h"
 #include "panel_view.h"
 #pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "comdlg32.lib")
@@ -382,7 +384,7 @@ struct PanelView::Impl {
             D2D1::Matrix3x2F place = panel_pots[i].slider
                 ? D2D1::Matrix3x2F::Translation(0, -value * m.travel)
                 : D2D1::Matrix3x2F::Rotation(m.lo + value * (m.hi - m.lo) - m.rest, D2D1::Point2F(m.cx, m.cy));
-            target->SetTransform(place * D2D1::Matrix3x2F::Scale(scale, scale));
+            target->SetTransform(place * D2D1::Matrix3x2F::Scale(scale, scale) * shift());
             size_t depth = 0;
             for (int r : m.runs) {
                 const Run& run = runs[r];
@@ -400,7 +402,7 @@ struct PanelView::Impl {
             while (depth) { target->PopLayer(); depth--; }
         }
         if (dial.found) {  // the dial's dimple, turned by the encoder
-            target->SetTransform(D2D1::Matrix3x2F::Rotation(dial_angle, D2D1::Point2F(dial.cx, dial.cy)) * D2D1::Matrix3x2F::Scale(scale, scale));
+            target->SetTransform(D2D1::Matrix3x2F::Rotation(dial_angle, D2D1::Point2F(dial.cx, dial.cy)) * D2D1::Matrix3x2F::Scale(scale, scale) * shift());
             size_t depth = 0;
             for (int r : dial.runs) {
                 const Run& run = runs[r];
@@ -417,7 +419,7 @@ struct PanelView::Impl {
             }
             while (depth) { target->PopLayer(); depth--; }
         }
-        target->SetTransform(D2D1::Matrix3x2F::Identity());
+        target->SetTransform(shift());
     }
 
     void build_geometry() {
@@ -467,8 +469,8 @@ struct PanelView::Impl {
         layer->CreateSolidColorBrush(D2D1::ColorF(0), &paint);
         layer->BeginDraw();
         layer->Clear(color(panel_blue));
-        float scale = std::min(width / art_w, height / art_h);
-        layer->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale));
+        float scale = art_scale();
+        layer->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * shift());
         std::vector<ID2D1Layer*> clips;
         size_t depth = 0;
         for (auto& r : runs) {
@@ -489,11 +491,65 @@ struct PanelView::Impl {
                 else fill(layer, r, paint);
             }
         }
+        draw_panel_c(layer, paint);
         layer->EndDraw();
         for (auto* l : clips) l->Release();
         layer->GetBitmap(&art);
         paint->Release();
         layer->Release();
+    }
+
+    // Panel C, drawn in the art's style (cream frames and print, black keys) from the service
+    // manual's sheet and Thor's photos: WHEEL MODE, KEYBOARD SENSE, and the ribbon's two keys.
+    void draw_panel_c(ID2D1RenderTarget* t, ID2D1SolidColorBrush* paint) {
+        float s = sx();
+        t->SetTransform(shift());
+        auto P = [&](float x, float y) { return D2D1::Point2F(x * s, y * s); };
+        const float x0 = -226, x1 = -12, line = 2.7f * s;
+        paint->SetColor(color(panel_cream));
+        struct Box { float y0, y1, bar; bool title_top; const wchar_t* title; };
+        const Box boxes[] = {{20, 230, 38, true, L"WHEEL MODE"}, {250, 440, 422, false, L"KEYBOARD SENSE"}, {460, 667, 649, false, L"RIBBON"}};
+        IDWriteFactory* dw = nullptr;
+        DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown**)&dw);
+        IDWriteTextFormat* title = nullptr, *label = nullptr;
+        if (dw) {
+            dw->CreateTextFormat(L"Arial", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_CONDENSED, 13.5f * s, L"", &title);
+            dw->CreateTextFormat(L"Arial", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_CONDENSED, 10.5f * s, L"", &label);
+            for (auto* f : {title, label}) if (f) { f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER); f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER); }
+        }
+        auto text = [&](IDWriteTextFormat* f, const wchar_t* str, float cx, float cy) {
+            if (f) t->DrawText(str, (UINT32)wcslen(str), f, D2D1::RectF((cx - 110) * s, (cy - 10) * s, (cx + 110) * s, (cy + 10) * s), paint);
+        };
+        for (const Box& b : boxes) {
+            t->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x0 * s, b.y0 * s, x1 * s, b.y1 * s), 15 * s, 15 * s), paint, line);
+            t->DrawLine(P(x0, b.bar), P(x1, b.bar), paint, line);
+            text(title, b.title, (x0 + x1) / 2, b.title_top ? (b.y0 + b.bar) / 2 : (b.bar + b.y1) / 2);
+        }
+        text(label, L"STND", -195, 82);
+        text(label, L"M.MORPH", -145, 82);
+        text(label, L"AFTERTOUCH", -68, 96);
+        text(label, L"EXCHANGE", -68, 111);
+        text(label, L"VELOCITY", -170, 372);
+        text(label, L"AFTERTOUCH", -68, 372);
+        text(label, L"RELATIVE", -170, 592);
+        text(label, L"HOLD", -68, 592);
+        for (const PanelLed& led : panel_leds) {  // the small indicators' unlit dots
+            if (led.x >= 0 || led.lamp) continue;
+            paint->SetColor(color(0xff0c0c0e));
+            t->FillEllipse(D2D1::Ellipse(P(led.x, led.y), 3.4f * s, 3.4f * s), paint);
+            paint->SetColor(color(panel_cream));
+            t->DrawEllipse(D2D1::Ellipse(P(led.x, led.y), 3.6f * s, 3.6f * s), paint, 0.9f * s);
+        }
+        for (const PanelKey& k : panel_keys) {  // black keys like the art's
+            if (k.x >= 0) continue;
+            paint->SetColor(color(0xff141416));
+            t->FillEllipse(D2D1::Ellipse(P(k.x, k.y), 21 * s, 12 * s), paint);
+            paint->SetColor(color(0xff3a3a3e));
+            t->FillEllipse(D2D1::Ellipse(P(k.x - 3, k.y - 4), 13 * s, 5 * s), paint);
+        }
+        if (label) label->Release();
+        if (title) title->Release();
+        if (dw) dw->Release();
     }
 
     void make_target() {
@@ -688,7 +744,12 @@ struct PanelView::Impl {
         return ok;
     }
 
-    float sx() const { return std::min(width / art_w, height / art_h) * art_w / panel_frame_w; }
+    // The canvas: Panel C's column (panel_c_w frame units), then the art. art_scale is pixels per art
+    // unit, sx pixels per frame unit, left the column's width in whole pixels.
+    float art_scale() const { return std::min(width / (art_w * (1 + panel_c_w / panel_frame_w)), height / art_h); }
+    float sx() const { return art_scale() * art_w / panel_frame_w; }
+    float left() const { return roundf(panel_c_w * sx()); }
+    D2D1::Matrix3x2F shift() const { return D2D1::Matrix3x2F::Translation(left(), 0); }
 
     void paint() {
         make_target();
@@ -697,12 +758,13 @@ struct PanelView::Impl {
         target->Clear(color(panel_blue));
         if (art) target->DrawBitmap(art);
         float s = sx();
+        target->SetTransform(shift());  // all below in frame units from the art's origin; Panel C at x < 0
 
         draw_lcd(s);
 
         if (getenv("OB12_PANEL_BARE")) { target->EndDraw(); return; }  // study: the art alone, for finding controls
         // Caps and knob faces move with their values; a red mark only where the art had none found.
-        draw_moving(std::min(width / art_w, height / art_h));
+        draw_moving(art_scale());
         // Lamps: lit from the Master's LED latches. A soft glow, then the lamp, then a highlight.
         uint8_t latches[16];
         engine.leds(latches);
@@ -737,6 +799,7 @@ struct PanelView::Impl {
             brush->SetColor(D2D1::ColorF(0.85f, 0.1f, 0.1f, 0.45f));
             target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(k.x * s, k.y * s), 21 * s, 12 * s), brush);
         }
+        target->SetTransform(D2D1::Matrix3x2F::Identity());
         if (target->EndDraw() == D2DERR_RECREATE_TARGET) drop_target();
     }
 
@@ -748,7 +811,7 @@ struct PanelView::Impl {
 
     void mouse_down(int x, int y) {
         float s = sx();
-        float fx = x / s, fy = y / s;
+        float fx = (x - left()) / s, fy = y / s;
         SetCapture(window);
         int count = sizeof panel_pots / sizeof panel_pots[0];
         for (int i = 0; i < count; i++) {
@@ -778,7 +841,7 @@ struct PanelView::Impl {
         if (drag_pot >= 0) set_pot(drag_pot, drag_start_value + (drag_start_y - y) * 256 / std::max(60, height / 3));
         if (drag_dial) {
             float s = sx();
-            float a = atan2f(x / s - panel_dial_x, -(y / s - panel_dial_y)) * 180 / 3.14159265f;
+            float a = atan2f((x - left()) / s - panel_dial_x, -(y / s - panel_dial_y)) * 180 / 3.14159265f;
             float d = a - dial_grab;
             if (d > 180) d -= 360;
             if (d < -180) d += 360;
@@ -895,6 +958,6 @@ void PanelView::resize(int width, int height) {
     InvalidateRect(impl->window, nullptr, FALSE);
 }
 
-float PanelView::aspect() const { return impl->art_w / impl->art_h; }
+float PanelView::aspect() const { return impl->art_w * (1 + panel_c_w / panel_frame_w) / impl->art_h; }
 
 void PanelView::on_width_request(std::function<void(int)> request) { impl->width_request = std::move(request); }

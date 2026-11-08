@@ -2290,3 +2290,14 @@ have spoiled any saved program with an F0 byte in a low half word. References un
   let it empty, so only the start marker went out. The gap now runs from the message's own line time
   (320 us a byte) and ignores other input. Measured with the clock running: 970 messages, 20225 words,
   A-001 "INIT" from the file after the reset. The firmware itself takes F8 between the messages.
+
+### Panel C (service manual p41 "OB12 Panel C: Top Level", measured)
+
+Buttons on BUTB[0] (bar 0): BUT5 Aftertouch Exchange, BUT4 Wheel Mode, BUT3 Velocity, BUT1 Aftertouch,
+BUT0 Hold, BUT2 Relative. Lamps on latch 0 (its own 74HC595), measured by pressing each key: Relative
+bit 6, Hold bit 2, Aftertouch Exchange bit 7, Velocity bit 3, Aftertouch bit 1, Stnd bit 5. At power
+on 0x28: Velocity and Stnd lit, as on Thor's photo. Velocity opens EDIT CONTROLLERS VELOCITY and turns
+it off; Aftertouch opens AFTER-T with STATUS ON: aftertouch is off until this key is pressed, which is
+why Thor's aftertouch did nothing. Wheel Mode changed nothing in the tests (alone, twice, after MORPH
+ENABLE or MANUAL), so M.Morph's lamp bit (taken as 4, the one left) is not verified.
+The art has no Panel C; the panel view draws it in a 240 unit column left of LFO1, in the art's style.

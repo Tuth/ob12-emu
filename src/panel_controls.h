@@ -35,7 +35,16 @@ static const PanelPot panel_pots[] = {
     {"EQ Q", 2293, 428, true, 7, 0}, {"EQ High", 2373, 428, true, 7, 3}, {"Master Volume", 2483, 428, true, 7, 2},
 };
 
+// Panel C (service manual p41, "Panel C: Top Level"): the board left of the keyboard. The art has
+// no drawing of it, so the panel view draws it in a column of its own left of LFO1: x below 0.
+static const float panel_c_w = 240;
+
 static const PanelKey panel_keys[] = {
+    // Panel C buttons, bar 0 (BUTB[0]): BUT4 wheel mode, BUT5 aftertouch exchange, BUT3 velocity,
+    // BUT1 aftertouch, BUT2 relative, BUT0 hold. Velocity and aftertouch measured by their pages.
+    {"Wheel Mode", -170, 150, 0, 4}, {"Aftertouch Exchange", -68, 150, 0, 5},
+    {"Velocity", -170, 340, 0, 3}, {"Aftertouch", -68, 340, 0, 1},
+    {"Relative", -170, 560, 0, 2}, {"Hold", -68, 560, 0, 0},
     {"LFO1 Wave", 115, 256, 1, 7}, {"Common Osc", 582, 256, 1, 4},
     {"Osc1 Wave 1", 702, 256, 1, 3}, {"Osc1 Wave 2", 756, 256, 1, 2}, {"Osc1 Wave 3", 810, 256, 1, 1}, {"Osc1 PWM Source", 970, 256, 1, 0},
     {"Osc2 Wave 1", 1211, 256, 5, 3}, {"Osc2 Wave 2", 1264, 256, 5, 4}, {"Osc2 Wave 3", 1318, 256, 5, 5},
@@ -71,6 +80,11 @@ static const float panel_lcd_x0 = 1190, panel_lcd_y0 = 325, panel_lcd_x1 = 1578,
 // key; an indicator is a small LED beside a label.
 struct PanelLed { const char* name; float x, y; int latch, bit; bool lamp; };
 static const PanelLed panel_leds[] = {
+    // Panel C lamps, latch 0 (its 74HC595): measured by pressing each key; M.Morph's bit is the one
+    // left over, not seen lit (the wheel mode key did not switch in the tests).
+    {"Stnd", -195, 100, 0, 5, false}, {"M.Morph", -145, 100, 0, 4, false},
+    {"Aftertouch Exchange", -79, 150, 0, 7, true}, {"Velocity", -181, 340, 0, 3, true},
+    {"Aftertouch", -79, 340, 0, 1, true}, {"Relative", -181, 560, 0, 6, true}, {"Hold", -79, 560, 0, 2, true},
     {"LFO2 Wave 1", 58, 485, 1, 7, false},
     {"LFO2 Wave 2", 58, 515, 1, 6, false},
     {"LFO2 Wave 3", 58, 545, 1, 5, false},
