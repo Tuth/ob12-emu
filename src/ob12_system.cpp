@@ -203,6 +203,8 @@ int main(int argc, char** argv) {
     options.divide_1fc = getenv("OB12_NO_1FC") == nullptr;
     options.noise_generator = getenv("OB12_NO_NOISE") == nullptr;
     options.late_mode_change = getenv("OB12_EARLY_MODE") == nullptr;
+    if (const char* m = getenv("OB12_SHIFT_PRODUCT")) options.shift_with_product = atoi(m);  // study
+    if (const char* m = getenv("OB12_LATE_MASK")) options.late_mode_mask = (unsigned)strtol(m, nullptr, 16);  // study
     options.compare_3e = getenv("OB12_NO_3E") == nullptr;
     options.bus_sum_saturates = getenv("OB12_BUS_WRAP") == nullptr;
     options.reuse_coefficient = getenv("OB12_MACLO") == nullptr;
@@ -284,7 +286,7 @@ int main(int argc, char** argv) {
             if (*p == ',') p++;
         }
     }
-    struct TimedMidi { double at; u8 status, note; };
+    struct TimedMidi { double at; u8 status, note, velocity; };
     std::vector<TimedMidi> midi_events;  // OB12_MIDI_EVENTS=t:on:nn,t:off:nn,...  note hex, into the Master
     size_t next_event = 0;
     double creads_at = getenv("OB12_CREADS") ? atof(getenv("OB12_CREADS")) : 0;  // study: list DASP4 multiply operands once at t
@@ -314,8 +316,11 @@ int main(int argc, char** argv) {
     if (const char* list = getenv("OB12_MIDI_EVENTS")) {
         double at; char kind[4]; int note, used;
         while (sscanf(list, "%lf:%3[a-z]:%x%n", &at, kind, &note, &used) == 3) {
-            midi_events.push_back({at, (u8)(kind[0] == 'p' ? 0xC0 : kind[1] == 'n' ? 0x90 : 0x80), (u8)note});  // t:pc:nn program change
+            u8 status = (u8)(kind[0] == 'p' ? 0xC0 : kind[1] == 'n' ? 0x90 : 0x80);  // t:pc:nn program change
             list += used;
+            int velocity = status == 0x90 ? 0x64 : 0x40, more = 0;  // t:on:nn:vv, velocity hex
+            if (*list == ':' && sscanf(list, ":%x%n", &velocity, &more) == 1) list += more;
+            midi_events.push_back({at, status, (u8)note, (u8)velocity});
             if (*list == ',') list++;
         }
     }
@@ -563,7 +568,7 @@ int main(int argc, char** argv) {
             while (next_event < midi_events.size() && now >= midi_events[next_event].at) {
                 auto& ev = midi_events[next_event++];
                 if (ev.status == 0xC0) m->midi_in({ev.status, ev.note});
-                else m->midi_in({ev.status, ev.note, (u8)(ev.status == 0x90 ? 0x64 : 0x40)});
+                else m->midi_in({ev.status, ev.note, ev.velocity});
             }
             if (next_midi < midi_notes.size() && now >= note_at + next_midi * 0.5) {
                 m->midi_in({0x90, midi_notes[next_midi], 0x64});

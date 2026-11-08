@@ -49,8 +49,7 @@ int Core::round_bits() const {
     return table[field(CR1, 9, 3)];
 }
 
-int32_t Core::mac_upper(int64_t value) const {
-    int shift = output_shift();
+int32_t Core::mac_upper_s(int64_t value, int shift) const {
     int64_t v = shift >= 0 ? value << shift : value >> -shift;
     int bits = round_bits();
     int64_t mask = 0;
@@ -68,8 +67,7 @@ int32_t Core::mac_upper(int64_t value) const {
     return s24((uint32_t)upper);
 }
 
-uint32_t Core::mac_lower(int64_t value) const {
-    int shift = output_shift();
+uint32_t Core::mac_lower_s(int64_t value, int shift) const {
     int64_t v = shift >= 0 ? value << shift : value >> -shift;
     uint32_t lower = (uint32_t)(v & LOW24);
     if (flag(CR1, MOVM)) {
@@ -148,7 +146,7 @@ void Core::load_acc(uint32_t word, int operation) {
     case 0: value = dmem[dmem_operand(word)]; break;
     case 1: value = cmem[cmem_operand(word)]; break;
     case 2: value = acc[flag8]; break;
-    case 3: value = mac_upper(mac_d2[flag8]); break;
+    case 3: value = upper_d2(flag8); break;
     }
     switch (operation) {
     case OpLoadUnsigned: if (value < 0) value = -value; break;
@@ -170,7 +168,7 @@ void Core::alu(uint32_t word, int operation) {
     } else {
         int source = top & 3;
         lhs = source < 2 ? dmem[dmem_operand(word)] : cmem[cmem_operand(word)];
-        rhs = (source & 1) ? mac_upper(mac_d2[flag8]) : acc[flag8];
+        rhs = (source & 1) ? upper_d2(flag8) : acc[flag8];
     }
     if (operation == OpAdd || operation == OpSub || operation == OpCmp) alu_last = u24(lhs);
     int64_t result = 0;
@@ -412,6 +410,7 @@ void Core::primary(uint32_t word) {
         mac[0] = mac[1] = 0;
         mac_d1[0] = mac[0];
         mac_d1[1] = mac[1];
+        shift_d1[0] = shift_d1[1] = output_shift();
         break;
     case 0x75: case 0x76: case 0x77: case 0x7e: case 0x7f: break;
     case 0x78: case 0x79: case 0x7a: case 0x7b: case 0x7c: case 0x7d: {
@@ -422,6 +421,7 @@ void Core::primary(uint32_t word) {
         if (op < 0x7c) mac_set_upper(unit, value);
         else mac_set_lower(unit, (uint32_t)value);
         mac_d1[unit] = mac[unit];
+        shift_d1[unit] = output_shift();
         break;
     }
 
@@ -519,12 +519,12 @@ void Core::secondary(uint32_t word) {
         else dmem[dmem_operand(word)] = acc[flag4];
         break;
     case 0x02:
-        if (flag8) cmem[cmem_operand(word)] = mac_upper(mac_d2[flag4]);
-        else dmem[dmem_operand(word)] = mac_upper(mac_d2[flag4]);
+        if (flag8) cmem[cmem_operand(word)] = upper_d2(flag4);
+        else dmem[dmem_operand(word)] = upper_d2(flag4);
         break;
     case 0x03:
-        if (flag8) cmem[cmem_operand(word)] = s24(mac_lower(mac_d2[flag4]));
-        else dmem[dmem_operand(word)] = s24(mac_lower(mac_d2[flag4]));
+        if (flag8) cmem[cmem_operand(word)] = s24(lower_d2(flag4));
+        else dmem[dmem_operand(word)] = s24(lower_d2(flag4));
         break;
     case 0x04: set_pointer(&da[flag8], acc[flag4] & 0xfff); break;
     case 0x05: set_pointer(&ca[flag8], acc[flag4] & 0xfff); break;
@@ -561,7 +561,7 @@ void Core::secondary(uint32_t word) {
         else dmem[dmem_operand(word)] = 0;
         break;
     case 0x18: case 0x19: case 0x1a:
-        ax[op - 0x18][flag8] = mac_upper(mac_d2[flag4]);
+        ax[op - 0x18][flag8] = upper_d2(flag4);
         break;
     case 0x20:
         switch (args) {
@@ -676,6 +676,7 @@ void Core::step() {
 
     pipeline();
     insn_cycles = 1;
+    int shift_start = output_shift();
 
     uint32_t top = word >> 24;
     if (top >= 0xc0) {
@@ -688,7 +689,7 @@ void Core::step() {
         post_increment(word);
     } else {
         uint32_t op = (word >> 16) & 0x3f;
-        if (options.late_mode_change && ((op >= 0x28 && op <= 0x2b) || (options.late_saturation_mode && op == 0x2d))) {
+        if (options.late_mode_change && ((op >= 0x28 && op <= 0x2b && (options.late_mode_mask >> (op - 0x28) & 1)) || (options.late_saturation_mode && op == 0x2d))) {
             primary(word);
             secondary(word);
         } else {
@@ -703,6 +704,8 @@ void Core::step() {
     for (int unit = 0; unit < 2; unit++) {
         mac_d2[unit] = mac_d1[unit];
         mac_d1[unit] = mac[unit];
+        shift_d2[unit] = shift_d1[unit];
+        shift_d1[unit] = options.shift_with_product == 2 ? shift_start : output_shift();
     }
 
     if (xmem_read_cycles != 0) {

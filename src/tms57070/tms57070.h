@@ -22,6 +22,10 @@ struct Options {
     bool divide_1fc = false;         // primary 1FC divides by the last ALU operand
     bool noise_generator = false;    // secondary 34 stores a noise word; real sequence unknown
     bool late_mode_change = false;   // secondaries 28-2B act after the primary of the same word
+    // study: 1 = the output shift travels with the product (shift at the end of the word that made it),
+    // 2 = the shift in effect at the start of that word; 0 = applied when the MAC is read (old model)
+    int shift_with_product = 0;
+    unsigned late_mode_mask = 0xf;   // which of 28, 29, 2A, 2B (bits 0-3) act late, with late_mode_change
     bool queued_pointer_load = false;  // secondaries 04-06, 08, 09 land two steps later, like C1-C5
     bool maclo_unsigned = false;     // primary 43 takes the low MAC word as unsigned
     bool maclo_shift = false;        // primary 43 product sits 24 bits lower, for double precision
@@ -50,6 +54,7 @@ public:
     uint32_t cr[4] = {};
     int32_t acc[2] = {};
     int64_t mac[2] = {}, mac_d1[2] = {}, mac_d2[2] = {};  // 52-bit, sign extended
+    int shift_d1[2] = {}, shift_d2[2] = {};  // output shift that goes with mac_d1, mac_d2 (shift_with_product)
     int32_t ar[2][2] = {};   // [port][0 left, 1 right]
     int32_t ax[3][2] = {};
     int32_t xrd = 0, t_reg = 0;
@@ -63,8 +68,12 @@ public:
     uint32_t xoff = 0;
     bool bio = false;
 
-    int32_t mac_upper(int64_t value) const;
-    uint32_t mac_lower(int64_t value) const;
+    int32_t mac_upper(int64_t value) const { return mac_upper_s(value, output_shift()); }
+    int32_t mac_upper_s(int64_t value, int shift) const;
+    int32_t upper_d2(int unit) const { return mac_upper_s(mac_d2[unit], options.shift_with_product ? shift_d2[unit] : output_shift()); }
+    uint32_t lower_d2(int unit) const { return mac_lower_s(mac_d2[unit], options.shift_with_product ? shift_d2[unit] : output_shift()); }
+    uint32_t mac_lower(int64_t value) const { return mac_lower_s(value, output_shift()); }
+    uint32_t mac_lower_s(int64_t value, int shift) const;
 
     // Encodings the core does not implement, for measurement.
     std::map<uint32_t, long> unknown;

@@ -2166,3 +2166,25 @@ the same), so the level is set before it, on the voice chips: on DASP0 a voice r
 inside and the bus cell it adds into (A13B2139 at 1A0) holds 0.024. `OB12_PC_RMS` now also prints the
 rms of an AX port word written at that address. Next: follow one sounding voice from its oscillator
 to its bus add and find which word scales it by about 1/4 too much.
+
+### The voice level hangs on when the output shift takes effect (measured, open)
+
+Thor checked the video in Sound Forge: A-014 to A-015 is nowhere near our step, with the unit's
+master volume untouched. Following one voice on DASP0 (`OB12_CREADS`, `OB12_TRACE_CHIP=0`): the voice
+leaves its filter near 0.14, is scaled by C126 (a per program level the Slave writes once at note on:
+A-001 051A34, A-015 ramps to 07FFFF, so its top is 1/16) and by the pan gains C0DE, C0DF (about 0.5),
+and adds into the bus at about 0.02. Velocity does not change C126 (harness `t:on:nn:vv`, new).
+Amplifier Amount (CC 7) does not either.
+
+The 1/16 is made up by output shifts (secondary 29, CR1 bits 12-13: none, x4, x16, /256), set and
+reset many times per voice (DASP0: 0FE x16, 120 x4, 12E none, ...). When a shift change takes effect
+decides the level. Measured, harness, one C3, A-001 / A-015 dBFS:
+- model now (29 after the primary of its word, shift applied when the MAC is read): -25.3 / -16.9;
+- 29 before the primary (`OB12_LATE_MASK`, new, bit 1 clear): -0.9 / -10.6, A-001 clipping;
+  28, 2A, 2B early or late change nothing here;
+- shift carried with the product (`OB12_SHIFT_PRODUCT=1` end of word, `=2` start): -2.0 / -1.4 and
+  -0.0 / -0.8, clipping.
+The unit sits between: clean programs about 12 dB above ours, A-015 about 4 dB over them. None of
+the three simple rules gives that, so the real rule is something else, perhaps different for the
+paths that store (02, 03) and the paths that add (alu with the MAC). Defaults are unchanged and the
+references stand; the options are study switches.
