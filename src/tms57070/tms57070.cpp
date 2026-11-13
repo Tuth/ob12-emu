@@ -38,13 +38,33 @@ struct Machine : Regs {
     Core* core;
     Options options;
     bool study_shift;
+    // CR1's status flags (bits 0-6: AOV, AOVL, ACCZ, ACCN, MOV, MOVL, MOVR) live here during a run
+    // and cr[1] keeps only the mode bits. Nearly every word changes a flag; kept in one word with
+    // them, the mode bits stopped being constants to the compiler a few words into a translation.
+    uint32_t status;
+    enum { STATUS = 0x7f };
 
-    TMS_INLINE explicit Machine(Core& c) : Regs(c), pmem(c.pmem), cmem(c.cmem), dmem(c.dmem), xmem(c.xmem.data()), wraps(c.wraps), core(&c), options(c.options), study_shift(c.study_shift) {}
-    TMS_INLINE void store() { static_cast<Regs&>(*core) = *this; }
+    TMS_INLINE explicit Machine(Core& c) : Regs(c), pmem(c.pmem), cmem(c.cmem), dmem(c.dmem), xmem(c.xmem.data()), wraps(c.wraps), core(&c), options(c.options), study_shift(c.study_shift) {
+        status = cr[1] & STATUS;
+        cr[1] &= ~(uint32_t)STATUS;
+    }
+    TMS_INLINE void store() {
+        cr[1] |= status;
+        static_cast<Regs&>(*core) = *this;
+        cr[1] &= ~(uint32_t)STATUS;
+    }
 
-    bool flag(int reg, int bit) const { return (cr[reg] >> bit) & 1; }
-    void set_flag(int reg, int bit, bool on) { cr[reg] = (cr[reg] & ~(1u << bit)) | ((uint32_t)on << bit); }
-    int field(int reg, int shift, int bits) const { return (cr[reg] >> shift) & ((1 << bits) - 1); }
+    TMS_INLINE bool flag(int reg, int bit) const { return ((reg == 1 && bit < 7 ? status : cr[reg]) >> bit) & 1; }
+    TMS_INLINE void set_flag(int reg, int bit, bool on) {
+        if (reg == 1 && bit < 7) status = (status & ~(1u << bit)) | ((uint32_t)on << bit);
+        else cr[reg] = (cr[reg] & ~(1u << bit)) | ((uint32_t)on << bit);
+    }
+    TMS_INLINE int field(int reg, int shift, int bits) const { return (cr[reg] >> shift) & ((1 << bits) - 1); }  // mode fields only
+    TMS_INLINE uint32_t get_cr(int reg) const { return reg == 1 ? cr[1] | status : cr[reg]; }
+    TMS_INLINE void set_cr(int reg, uint32_t value) {
+        if (reg == 1) { status = value & STATUS; cr[1] = value & ~(uint32_t)STATUS; }
+        else cr[reg] = value;
+    }
 
     int output_shift() const;
     int round_bits() const;
@@ -510,7 +530,7 @@ TMS_INLINE void Machine::primary(uint32_t word) {
     case 0xca: acc[0] = s24(word); settle_acc(acc[0]); break;
     case 0xcb: acc[1] = s24(word); settle_acc(acc[1]); break;
     case 0xcc: cr[CR0] = word & 0xffffff; break;
-    case 0xcd: cr[CR1] = word & 0xffffff; break;
+    case 0xcd: set_cr(CR1, word & 0xffffff); break;
     case 0xce: {
         uint32_t value = word & 0xffffff;
         uint32_t common = value & cr[CR2] & 0xff;
@@ -632,9 +652,9 @@ TMS_INLINE void Machine::secondary(uint32_t word) {
         else if (args == 2) goff = 0;
         break;
     case 0x22:
-        cr[args] = u24(cmem[cmem_operand(word)]);
+        set_cr(args, u24(cmem[cmem_operand(word)]));
         break;
-    case 0x23: cmem[cmem_operand(word)] = s24(cr[args]); break;
+    case 0x23: cmem[cmem_operand(word)] = s24(get_cr(args)); break;
     case 0x26: hir = u24(flag8 ? cmem[cmem_operand(word)] : dmem[dmem_operand(word)]); break;
     case 0x27:
         if (!flag(CR1, LCMEM)) {
@@ -825,10 +845,11 @@ void Core::run_steps(int steps) {
 }
 
 // What a translated half takes for granted at its first word: nothing queued for the address
-// registers, no XMEM read on its way, no repeat, and the CR1 mode bits its translation assumed.
+// registers, no XMEM read on its way, no repeat, the CR1 mode bits its translation assumed, and
+// CR3 and the DMEM ring size the program was translated for (no word of it changes those).
 bool Core::fast_ready(int half) const {
     return !study_shift && rptc == 0 && xmem_read_cycles == 0 && single_reg[0] < 0 && single_reg[1] < 0 && dual_reg[0] < 0 && dual_reg[1] < 0
-        && (cr[CR1] & fast_mask[half]) == fast_value[half];
+        && (cr[CR1] & fast_mask[half]) == fast_value[half] && cr[CR3] == fast_cr3 && dcirc == fast_dcirc && doff <= dcirc;
 }
 
 void Core::run(int steps) {
@@ -846,9 +867,19 @@ void Core::run(int steps) {
 
 // The engine's options, which the translated code is compiled for.
 static bool engine_options(const Options& o) {
-    return o.audio_port_writes && o.true_dmem_ring && o.lock_delay && o.maclo_multiply && o.divide_1fc && o.noise_generator
+    return o.shift_paths == 3 && o.audio_port_writes && o.true_dmem_ring && o.lock_delay && o.maclo_multiply && o.divide_1fc && o.noise_generator
         && o.late_mode_change && o.compare_3e && o.maclo_shift && o.maclo_unsigned && o.queued_pointer_load && o.bus_sum_saturates
         && o.reuse_coefficient && o.late_saturation_mode && o.xread_flush && o.late_mode_mask == 0xf && o.shift_with_product == 0;
+}
+
+static TMS_INLINE Options fast_options(int xread, uint32_t xwords) {
+    Options o;
+    o.audio_port_writes = o.true_dmem_ring = o.lock_delay = o.maclo_multiply = o.divide_1fc = o.noise_generator = true;
+    o.late_mode_change = o.compare_3e = o.maclo_shift = o.maclo_unsigned = o.queued_pointer_load = o.bus_sum_saturates = true;
+    o.reuse_coefficient = o.late_saturation_mode = o.xread_flush = true;
+    o.xread_cycles = xread;
+    o.xmem_words = xwords;
+    return o;
 }
 
 // One translated half: the registers come onto the stack, 256 constant words run in a line, the
@@ -858,15 +889,14 @@ static bool engine_options(const Options& o) {
 #else
 #define FAST_ASSUME(x) (void)0
 #endif
-#define FAST_ENTER(mask, value) \
+#define FAST_ENTER(mask, value, cr3, ring, xread, xwords) \
     Machine m(*this); \
-    FAST_ASSUME(m.options.audio_port_writes && m.options.true_dmem_ring && m.options.lock_delay && m.options.maclo_multiply); \
-    FAST_ASSUME(m.options.divide_1fc && m.options.noise_generator && m.options.late_mode_change && m.options.compare_3e); \
-    FAST_ASSUME(m.options.maclo_shift && m.options.maclo_unsigned && m.options.queued_pointer_load && m.options.bus_sum_saturates); \
-    FAST_ASSUME(m.options.reuse_coefficient && m.options.late_saturation_mode && m.options.xread_flush); \
-    FAST_ASSUME(m.options.late_mode_mask == 0xf && m.options.shift_with_product == 0 && !m.study_shift); \
+    m.options = fast_options(xread, xwords);  /* written out, not assumed: select_fast() checked they are these */ \
+    m.study_shift = false; \
     FAST_ASSUME(m.rptc == 0 && m.xmem_read_cycles == 0 && m.single_reg[0] < 0 && m.single_reg[1] < 0 && m.dual_reg[0] < 0 && m.dual_reg[1] < 0); \
-    FAST_ASSUME((m.cr[1] & (mask)) == (value));
+    FAST_ASSUME((m.cr[1] & (mask)) == (value)); \
+    FAST_ASSUME(m.cr[3] == (cr3) && m.dcirc == (ring) && m.doff <= m.dcirc); \
+    (void)0;
 #define W(word) m.step_word(word, true);
 #define FAST_LEAVE m.store();
 

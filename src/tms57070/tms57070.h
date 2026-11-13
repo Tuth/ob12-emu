@@ -129,6 +129,8 @@ private:
     Options options;
     int fast_program = -1;
     uint32_t fast_mask[2] = {}, fast_value[2] = {};  // CR1 mode bits each translated half expects at its start
+    uint32_t fast_cr3 = 0;    // CR3 as the program's header loads it
+    uint16_t fast_dcirc = 0;  // the DMEM ring size the start-up program leaves
     bool fast_ready(int half) const;
     typedef void (Core::*FastHalf)();
     static const FastHalf fast_table[][2];

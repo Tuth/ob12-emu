@@ -36,11 +36,12 @@
     "core_compare": "build/core_compare.exe rom/dsp 2000 (needs a local public emulator copy)",
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8",
     "tone": "OB12_MIDI_EVENTS=13:pc:10 OB12_AUX_TONE=400000 OB12_BUS_TONE=1 build/ob12_system.exe rom 19 15 build/tone.wav, then python tools/tone_junk.py build/tone.wav: junk below -50 dB on both sides",
-    "dsp_bench": "build tools/dsp_bench.cpp with build/tms57070.obj and /Ibuild; dsp_bench rom/dsp 0 (1, 4): 'same state', translated halves 390625, single steps 0",
-    "build_order": "build_master.bat (runs gen_fast.py), build_engine.bat, build_pgo.bat, build_engine.bat, build_vst3.bat"
+    "dsp_bench": "build tools/dsp_bench.cpp with build/tms57070.obj and /Ibuild; dsp_bench rom/dsp 0, 1, 4: 'same state' (FA417F6D, 356212FB, 77E99AC1), translated halves 390625, single steps 0",
+    "build_order": "build_master.bat (runs gen_fast.py), build_engine.bat, build_pgo.bat, build_engine.bat, build_vst3.bat",
+    "same_as_before": "build/fm/ab.sh: eight seq_test scenarios against a kept old seq_test; MD5s must match (keep an old seq_test.exe before changing the cores)"
   },
   "status": {
-    "phase": "DSP programs translated: the whole machine on one thread at 0.43 of a core",
+    "phase": "The whole machine on one thread at about 0.2 of a core, bit identical",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -98,7 +99,8 @@
       "A-017 Split: timbre B-021 stores filter BALANCE 0 (A0 44, EDIT FILTERS ROUTING page), filter 1 only; Osc 2 is the silent FM modulator. Firmware and preset true",
       "Signal path audit from the rendered sheets: FS 48.000 kHz from a 12.288 MHz oscillator; ATF1500 is the clock divider and host serializer, 74HC541 the clock fan out; S/PDIF and main DAC take DASP4 AX2 as it is, 24 bit I2S; PCM1716 setup confirmed against its data sheet",
       "DSP programs translated per half frame (tools/gen_fast.py, Machine on the stack): voices 1.2 ns a step, effects 3.4; whole machine bit identical; one thread by default, 0.43 of a core at 2.4 x real time",
-      "CPUs: Master idle loop taken at once, direct memory windows, statistics off when lean; steady state CPUs 1.57 us a sample, whole machine 6.4; output, flash and LEDs identical"
+      "CPUs: Master idle loop taken at once, direct memory windows, statistics off when lean; steady state CPUs 1.57 us a sample, whole machine 6.4; output, flash and LEDs identical",
+      "Translation: status flags apart from CR1's mode bits, constant options, ring size, CR3 and XMEM timing known: voices 0.7 ns a step, effects 1.0; machine 3.6 us a sample; all checks identical"
     ],
     "blocked": []
   },
@@ -112,7 +114,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "CPU: 6.4 us of work a sample after boot (0.31 of a core). Left: effects chip 2.43 (XMEM cache misses), Slave 1.18 (interpreter: virtual hook per instruction, byte fetches), voice chips 0.6 each. Play build/next8 in a host",
+    "CPU: 3.6 us of work a sample after boot (0.19-0.25 of a core, one thread, 4.6 x). Left: Slave 1.16 (interpreter), chips 2.1 together, Master 0.35. Play build/next9 in a host",
     "Signal path audit done to the S/PDIF point (no difference found). Left: where AESEL comes from, the CS8402A straps against its data sheet (Thor has none yet), AX2 left/right latch time, aux output in the plug-in, analog low passes",
     "Osc 1 FM raises the level (A-001: +13.5 dB at maximum, to the rail): the differentiated waveform stage 0DA-0E8 with note-on coefficients; needs a unit's recording, FM 0 against maximum, same note",
     "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
@@ -161,5 +163,5 @@
   "reference_md5": "7a47ad74c1612850a09ab8639650b691",
   "host_bursts": "Host update words taken in per chip select (16 words), at the next sample start. A-018 pops gone; first note after program change still has one spike. OB12_HOST_SINGLE=1 old model.",
   "controllers": "VST3 IMidiMapping: CC 0-127, aftertouch, pitch bend forwarded to the Master.",
-  "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next8 (translated DSP programs, one thread); OB12_XREAD_CYCLES=0 in ob12_system is the old table."
+  "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next9 (translated DSP programs, one thread); OB12_XREAD_CYCLES=0 in ob12_system is the old table."
 }

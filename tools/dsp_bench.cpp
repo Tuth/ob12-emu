@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
         c.load_control(h.data());
         for (int i = 0; i < 512; i++) c.pmem[i] = p[i * 4] << 24 | p[i * 4 + 1] << 16 | p[i * 4 + 2] << 8 | p[i * 4 + 3];
         for (size_t i = 0; i + 2 < k.size() && i / 3 < 512; i += 3) c.cmem[i / 3] = (int32_t)((uint32_t)(k[i] << 16 | k[i + 1] << 8 | k[i + 2]) << 8) >> 8;
+        if (argv[2][0] == '4') c.dcirc = 0xCD;  // what the effects chip's start-up program (prog9, C70CD000) leaves
         if (fast) c.select_fast();
         uint32_t noise = 1;
         auto t0 = std::chrono::steady_clock::now();

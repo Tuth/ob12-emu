@@ -2681,3 +2681,33 @@ scenarios equal to the old engine's again, and a boot on an empty memory with a 
 What is left of the 6.4 us: the effects chip 2.43 (4.7 ns a step against 1.2 on a voice chip: its
 128K words of XMEM do not fit the cache), the Slave 1.18, the four voice chips 2.4 together.
 VST3: build/next8. Not yet played in a host.
+
+## The translation told more: status flags apart, ring size, CR3, XMEM timing (measured)
+
+The effects chip took 4.7 ns a step where a voice chip took 1.2. The translated code showed why
+(disassembly of `fast_2a`: 350 bytes a word, tests of CR1 bits 16, 19 to 21, 23 all through it):
+- CR1 holds the mode bits and the status flags (bits 0 to 6: AOV, AOVL, ACCZ, ACCN, MOV, MOVL, MOVR)
+  in one word. Nearly every word changes a flag, and after a few words of such updates the compiler
+  no longer knew the mode bits. `Machine` now keeps the flags in `status` during a run and only
+  the mode bits in `cr[1]`; `store()` puts them together again. `flag`, `set_flag`, `get_cr`,
+  `set_cr` hide the split.
+- The options were assumed, and two of them (XMEM size, read flush) were still read from the core
+  at each use. A translated half now writes its options as constants (`fast_options`);
+  `select_fast()` has checked that the core's are those.
+- The XMEM read time and size are constants for the program that reads XMEM (5 words, 20000), so
+  the count down per step is gone; `select_fast()` refuses the program on other values.
+- CR3 is what the header loads (no word writes it): checked in `fast_ready()`, a constant inside.
+- The DMEM ring size: no big program sets it, a start-up program does (prog9 ends with `C70CD000`,
+  ring 00 to CD, for the effects chip; the voice chips keep 0). `gen_fast.py` takes the ring of the
+  start-up program with a C7 word for the program with XMEM reads and 0 for the others;
+  `fast_ready()` checks it (and DOFF within the ring), so a wrong pairing would only cost speed.
+  `dsp_bench` sets the ring for program 4 as the machine has it; its state number is now 77E99AC1.
+
+Measured, profile guided, `dsp_bench`: voices 0.70 and 0.71 ns a step (were 1.26, 1.18), effects
+0.98 (was 3.43); same state word by word and translated. The object file is 238 KB (was 540).
+`OB12_TIME_LOG=14`, us a sample: chips 0.38, 0.38, 0.38, 0.37, 0.55 (were 0.63, 0.62, 0.59, 0.57,
+2.43); CPUs 1.54 (Master 0.35, Slave 1.16): 3.6 in all, of a 20.8 us sample.
+`engine_test rom 16`: 4.64 x on one thread (2.64 x). `pace_test`: 0.19 to 0.25 cores, 0 ring empties.
+All the checks again: reference 7a47ad74 on engine and harness, the eight scenarios, and the flash
+format with a store, equal to the old engine. VST3: build/next9, not yet played in a host.
+The Slave is now the largest single part.
