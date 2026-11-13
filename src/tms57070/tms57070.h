@@ -41,21 +41,11 @@ struct Options {
     bool bus_sum_saturates = false;  // the OB-12 voice output adds clip instead of wrapping
 };
 
-class Core {
-public:
-    explicit Core(const Options& options = Options());
-
-    void reset();
-    void step();
-    void load_control(const uint8_t* header);  // 12 bytes, CR0-CR3, big-endian
-
-    uint32_t pmem[512] = {};
-    int32_t cmem[512] = {};
-    int32_t dmem[512] = {};
-    std::vector<int32_t> xmem;
-
-    // Control registers, 24 bits each.
-    uint32_t cr[4] = {};
+// The registers: everything a step reads and writes except the memories. Core is a Regs, so
+// core.acc, core.pc and the rest read as before. A run copies them into a Machine on the stack,
+// where the compiler keeps them in machine registers, and copies them back at the end.
+struct Regs {
+    uint32_t cr[4] = {};     // control registers, 24 bits each
     int32_t acc[2] = {};
     int64_t mac[2] = {}, mac_d1[2] = {}, mac_d2[2] = {};  // 52-bit, sign extended
     int shift_d1[2] = {}, shift_d2[2] = {};  // output shift that goes with mac_d1, mac_d2 (shift_with_product)
@@ -67,78 +57,14 @@ public:
     uint32_t rptc = 0;
     uint16_t stack[4] = {};
     uint8_t sp = 0;
-    uint16_t ca[2] = {}, da[2] = {}, cir[2] = {}, dir[2] = {};
+    // The eight address registers, also as one array for the queued loads: da 0-1, dir 2-3, ca 4-5, cir 6-7.
+    union {
+        struct { uint16_t da[2], dir[2], ca[2], cir[2]; };
+        uint16_t preg[8];
+    };
     uint16_t coff = 0, ccirc = 0, doff = 0, dcirc = 0, goff = 0;
     uint32_t xoff = 0;
     bool bio = false;
-
-    int32_t mac_upper(int64_t value) const { return mac_upper_s(value, output_shift()); }
-    int32_t mac_upper_s(int64_t value, int shift) const;
-    // study: per program address, how often a read sees a shift other than the one of its product's word
-    mutable long shift_mismatch[512] = {};
-    mutable uint32_t product_pc_d1[2] = {}, product_pc_d2[2] = {};
-    std::vector<int> shift_pcs;  // study: product-time shift only for reads at these addresses (empty: all)
-    bool product_shift_here(int path) const {
-        if (!options.shift_with_product || !(options.shift_paths & path)) return false;
-        if (shift_pcs.empty()) return true;
-        int here = (pc - 1) & 0x1ff;
-        for (int p : shift_pcs) if (p == here) return true;
-        return false;
-    }
-    // The study switches cost nothing when off: the plain read is the model (see "The voice level
-    // hangs on when the output shift takes effect" in docs/HARDWARE.md).
-    int32_t upper_d2(int unit, int path = 1) const {
-        if (!study_shift) return mac_upper(mac_d2[unit]);
-        if (shift_d2[unit] != output_shift()) shift_mismatch[(pc - 1) & 0x1ff]++;
-        return mac_upper_s(mac_d2[unit], product_shift_here(path) ? shift_d2[unit] : output_shift());
-    }
-    uint32_t lower_d2(int unit) const { return study_shift ? mac_lower_s(mac_d2[unit], product_shift_here(1) ? shift_d2[unit] : output_shift()) : mac_lower(mac_d2[unit]); }
-    bool study_shift = false;  // the shift studies are on: set by the harness (OB12_SHIFT_*)
-    uint32_t mac_lower(int64_t value) const { return mac_lower_s(value, output_shift()); }
-    uint32_t mac_lower_s(int64_t value, int shift) const;
-
-    // Encodings the core does not implement, for measurement.
-    std::map<uint32_t, long> unknown;
-    long wraps[512] = {};  // ACC overflows without saturation, by word
-
-    // Study access: the CMEM and DMEM index a word would use now.
-    uint32_t study_cmem(uint32_t word) const { return cmem_operand(word); }
-    uint32_t study_dmem(uint32_t word) const { return dmem_operand(word); }
-    uint32_t study_xmem(uint32_t address) const { return xmem_index(address); }
-    uint32_t study_xread() const { return xmem_read_address; }
-
-private:
-    bool flag(int reg, int bit) const { return (cr[reg] >> bit) & 1; }
-    void set_flag(int reg, int bit, bool on) { cr[reg] = (cr[reg] & ~(1u << bit)) | ((uint32_t)on << bit); }
-    int field(int reg, int shift, int bits) const { return (cr[reg] >> shift) & ((1 << bits) - 1); }
-
-    uint32_t cmem_index(uint32_t address) const;
-    uint32_t dmem_index(uint32_t address) const;
-    uint32_t cmem_operand(uint32_t word) const;
-    uint32_t dmem_operand(uint32_t word) const;
-    uint32_t xmem_index(uint32_t address) const;
-
-    void primary(uint32_t word);
-    void secondary(uint32_t word);
-    void post_increment(uint32_t word);
-    void jump(uint32_t word);
-    void pipeline();
-    void queue_single(uint16_t* target, uint16_t value);
-    void queue_dual(uint16_t* target, uint32_t value);
-    void set_pointer(uint16_t* target, uint16_t value);
-
-    int32_t settle_acc(int64_t value);
-    void load_acc(uint32_t word, int operation);
-    void alu(uint32_t word, int operation);
-    void multiply(int unit, int64_t lhs, int64_t rhs, bool negate);
-    void accumulate(int unit, int64_t lhs, int64_t rhs, bool negate);
-    void mac_shift(int unit, int amount);
-    void mac_set_upper(int unit, int32_t value);
-    void mac_set_lower(int unit, uint32_t value);
-
-    Options options;
-    int output_shift() const;
-    int round_bits() const;
 
     int32_t last_coefficient = 0;
     uint32_t alu_last = 0;
@@ -147,12 +73,66 @@ private:
     int insn_cycles = 1;
     uint32_t xmem_read_address = 0;
     int xmem_read_cycles = 0;
-
-    // Address register writes land two steps later.
-    uint16_t* single_ptr[2] = {};
+    // Address register writes land two steps later: the register's index in preg, -1 for none.
+    int single_reg[2] = {-1, -1};
     uint16_t single_value[2] = {};
-    uint16_t* dual_ptr[2] = {};
+    int dual_reg[2] = {-1, -1};
     uint32_t dual_value[2] = {};
+
+    Regs() : preg{} {}
+};
+
+struct Machine;
+
+class Core : public Regs {
+public:
+    explicit Core(const Options& options = Options());
+
+    void reset();
+    void step() { run_steps(1); }
+    // steps words. On a program select_fast() knows, whole half frames (256 words from PC 0 or
+    // 100) run from code translated for that program, bit for bit the same as step().
+    void run(int steps);
+    void select_fast();  // call after PMEM is loaded
+    bool fast_selected() const { return fast_program >= 0; }
+    long fast_halves = 0, slow_steps = 0;  // how run() went, for measurement
+    void load_control(const uint8_t* header);  // 12 bytes, CR0-CR3, big-endian
+
+    uint32_t pmem[512] = {};
+    int32_t cmem[512] = {};
+    int32_t dmem[512] = {};
+    std::vector<int32_t> xmem;
+
+    int32_t mac_upper(int64_t value) const;
+    uint32_t mac_lower(int64_t value) const;
+    // study: per program address, how often a read sees a shift other than the one of its product's word
+    mutable long shift_mismatch[512] = {};
+    std::vector<int> shift_pcs;  // study: product-time shift only for reads at these addresses (empty: all)
+    bool study_shift = false;  // the shift studies are on: set by the harness (OB12_SHIFT_*)
+    // study: the shift a read of mac_d2 takes; counts the mismatches when count is set
+    int study_pick_shift(int product_shift, int now_shift, int at_pc, int path, bool count) const;
+
+    // Encodings the core does not implement, for measurement.
+    std::map<uint32_t, long> unknown;
+    void note_unknown(uint32_t key);
+    long wraps[512] = {};  // ACC overflows without saturation, by word
+
+    // Study access: the CMEM and DMEM index a word would use now.
+    uint32_t study_cmem(uint32_t word) const;
+    uint32_t study_dmem(uint32_t word) const;
+    uint32_t study_xmem(uint32_t address) const;
+    uint32_t study_xread() const { return xmem_read_address; }
+
+private:
+    friend struct Machine;
+    void run_steps(int steps);
+    Options options;
+    int fast_program = -1;
+    uint32_t fast_mask[2] = {}, fast_value[2] = {};  // CR1 mode bits each translated half expects at its start
+    bool fast_ready(int half) const;
+    typedef void (Core::*FastHalf)();
+    static const FastHalf fast_table[][2];
+    void fast_0a(); void fast_0b(); void fast_1a(); void fast_1b(); void fast_2a(); void fast_2b();
 };
 
 }  // namespace tms

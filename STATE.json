@@ -109,6 +109,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "BRANCH dsp-translator, unfinished: core runs on a stack copy of the registers (Machine), tools/gen_fast.py translates the three programs per half frame into build/tms_fast.inc. dsp_bench: same state, 1.38 ns a step voices (11.8 x), 3.68 effects (4.0 x). LEFT: engine to call dsp->run(256) and select_fast() after PMEM load; /Ibuild and gen_fast in build_master.bat and build_pgo.bat; engine_test MD5 7a47ad74 must hold; pace_test; VST3; notes. master is untouched and good",
     "CPU: both CPUs are 0.13 of a core; the five DSP cores are nearly all the work (6.6 us a sample each alone, 9-10 in the engine's slow state). Next: translate the DSP programs with the CR1 mode bits followed per word. Measure only in turn, several rounds: the machine has a fast and a slow state. Fast state margin of the new thread layout not confirmed",
     "Signal path audit done to the S/PDIF point (no difference found). Left: where AESEL comes from, the CS8402A straps against its data sheet (Thor has none yet), AX2 left/right latch time, aux output in the plug-in, analog low passes",
     "Osc 1 FM raises the level (A-001: +13.5 dB at maximum, to the rail): the differentiated waveform stage 0DA-0E8 with note-on coefficients; needs a unit's recording, FM 0 against maximum, same note",

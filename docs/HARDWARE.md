@@ -2584,3 +2584,7 @@ Not modelled, by choice or not yet:
   words apart; a frame edge between them would skew one channel by a sample. Not known.
 - After the DAC (analog only, not on the digital output): the DAC's own filter, the two low passes
   (47.0 and 70.5 kHz, about 0.5 dB at 20 kHz together). The plug-in has the gain and the DC blocks.
+
+CS8402A, from its data sheet (Thor's CS8401.PDF, page 18, Table 3, rendered): M2 M1 M0 = 1 0 0 is
+"4 - Left/Right, I2S Compatible", 16 to 24 bits. So the transmitter takes the whole 24 bit word in
+the same format as the DAC. Closes that point of the audit; the channel status straps stay unread.

@@ -1,4 +1,5 @@
-// Speed of the TMS57070 core alone: a carved program from rom/dsp through step(), noise on the input.
+// Speed of the TMS57070 core alone: a carved program from rom/dsp, noise on the input, word by
+// word and through the translated program; the two must leave the same state.
 // usage: dsp_bench <rom dir>/dsp <program number> [million steps]
 #include "tms57070/tms57070.h"
 #include <chrono>
@@ -21,21 +22,28 @@ int main(int argc, char** argv) {
     o.late_mode_change = o.compare_3e = o.maclo_shift = o.maclo_unsigned = o.queued_pointer_load = o.bus_sum_saturates = true;
     o.reuse_coefficient = o.late_saturation_mode = o.xread_flush = true;
     if (argv[2][0] == '4') { o.xmem_words = 0x20000; o.xread_cycles = 5; }
-    tms::Core c(o);
-    auto h = read(base + ".hdr.bin"), p = read(base + ".pmem.bin"), k = read(base + ".cmem.bin");
-    c.load_control(h.data());
-    for (int i = 0; i < 512; i++) c.pmem[i] = p[i * 4] << 24 | p[i * 4 + 1] << 16 | p[i * 4 + 2] << 8 | p[i * 4 + 3];
-    for (size_t i = 0; i + 2 < k.size() && i / 3 < 512; i += 3) c.cmem[i / 3] = (int32_t)((uint32_t)(k[i] << 16 | k[i + 1] << 8 | k[i + 2]) << 8) >> 8;
-    uint32_t noise = 1;
-    auto t0 = std::chrono::steady_clock::now();
-    for (long done = 0; done < steps; done += 256) {
-        noise = noise * 1664525u + 1013904223u;
-        c.ar[0][0] = c.ar[0][1] = (int32_t)(noise >> 12) - 0x80000;
-        for (int i = 0; i < 256; i++) c.step();
+    double ns[2]; uint32_t sum[2];
+    for (int fast = 0; fast < 2; fast++) {  // word by word, then through run() with the translated program
+        tms::Core c(o);
+        auto h = read(base + ".hdr.bin"), p = read(base + ".pmem.bin"), k = read(base + ".cmem.bin");
+        c.load_control(h.data());
+        for (int i = 0; i < 512; i++) c.pmem[i] = p[i * 4] << 24 | p[i * 4 + 1] << 16 | p[i * 4 + 2] << 8 | p[i * 4 + 3];
+        for (size_t i = 0; i + 2 < k.size() && i / 3 < 512; i += 3) c.cmem[i / 3] = (int32_t)((uint32_t)(k[i] << 16 | k[i + 1] << 8 | k[i + 2]) << 8) >> 8;
+        if (fast) c.select_fast();
+        uint32_t noise = 1;
+        auto t0 = std::chrono::steady_clock::now();
+        for (long done = 0; done < steps; done += 256) {
+            noise = noise * 1664525u + 1013904223u;
+            c.ar[0][0] = c.ar[0][1] = (int32_t)(noise >> 12) - 0x80000;
+            c.run(256);
+        }
+        ns[fast] = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / steps;
+        uint32_t s = 0;  // a change that keeps the behaviour keeps this number
+        for (int i = 0; i < 512; i++) s = s * 31 + (uint32_t)c.dmem[i] + (uint32_t)c.cmem[i];
+        for (int32_t x : c.xmem) s = s * 31 + (uint32_t)x;
+        sum[fast] = s + c.ax[1][0] + c.ax[1][1] + c.ax[0][0] + c.pc + c.cr[1] + c.acc[0] + c.acc[1];
+        printf("%s: %.2f ns a step, state %08X, translated halves %ld, single steps %ld\n", fast ? "translated" : "word by word", ns[fast], sum[fast], c.fast_halves, c.slow_steps);
     }
-    double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / steps;
-    uint32_t sum = 0;  // a change that keeps the behaviour keeps this number
-    for (int i = 0; i < 512; i++) sum = sum * 31 + (uint32_t)c.dmem[i] + (uint32_t)c.cmem[i];
-    printf("%.2f ns a step, state %08X\n", ns, sum + c.ax[1][0] + c.pc);
-    return 0;
+    printf("%s, %.2f x\n", sum[0] == sum[1] ? "same state" : "STATES DIFFER", ns[0] / ns[1]);
+    return sum[0] != sum[1];
 }

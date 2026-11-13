@@ -20,36 +20,94 @@ inline uint32_t u24(int32_t value) { return (uint32_t)value & 0xffffff; }
 const uint64_t LOW24 = 0xffffff;
 }  // namespace
 
-Core::Core(const Options& chosen) : xmem(chosen.xmem_words > 0x10000 ? chosen.xmem_words : 0x10000, 0), options(chosen) { reset(); }
+#if defined(__clang__) || defined(__GNUC__)
+#define TMS_INLINE __attribute__((always_inline)) inline
+#else
+#define TMS_INLINE inline
+#endif
 
-void Core::reset() {
-    pc = 0;
-    sp = 0;
-    rptc = 0;
-    xmem_read_address = 0;
-    xmem_read_cycles = 0;
-    cr[CR0] = 0xAA9BAD;
-    cr[CR1] = 0x810100;
-    cr[CR2] = 0x30FF00;
-    cr[CR3] = 0xE50000;
-    for (int i = 0; i < 2; i++) { single_ptr[i] = nullptr; dual_ptr[i] = nullptr; }
-}
+enum { PDA = 0, PDIR = 2, PCA = 4, PCIR = 6 };  // indices into Regs::preg
 
-void Core::load_control(const uint8_t* h) {
-    for (int i = 0; i < 4; i++) cr[i] = h[i * 3] << 16 | h[i * 3 + 1] << 8 | h[i * 3 + 2];
-}
+// The registers on the stack with the memories beside them: what a run works on.
+struct Machine : Regs {
+    uint32_t* pmem;
+    int32_t* cmem;
+    int32_t* dmem;
+    int32_t* xmem;
+    long* wraps;
+    Core* core;
+    Options options;
+    bool study_shift;
 
-int Core::output_shift() const {
+    TMS_INLINE explicit Machine(Core& c) : Regs(c), pmem(c.pmem), cmem(c.cmem), dmem(c.dmem), xmem(c.xmem.data()), wraps(c.wraps), core(&c), options(c.options), study_shift(c.study_shift) {}
+    TMS_INLINE void store() { static_cast<Regs&>(*core) = *this; }
+
+    bool flag(int reg, int bit) const { return (cr[reg] >> bit) & 1; }
+    void set_flag(int reg, int bit, bool on) { cr[reg] = (cr[reg] & ~(1u << bit)) | ((uint32_t)on << bit); }
+    int field(int reg, int shift, int bits) const { return (cr[reg] >> shift) & ((1 << bits) - 1); }
+
+    int output_shift() const;
+    int round_bits() const;
+    TMS_INLINE int32_t mac_upper(int64_t value) const { return mac_upper_s(value, output_shift()); }
+    int32_t mac_upper_s(int64_t value, int shift) const;
+    TMS_INLINE uint32_t mac_lower(int64_t value) const { return mac_lower_s(value, output_shift()); }
+    uint32_t mac_lower_s(int64_t value, int shift) const;
+    // The study switches cost nothing when off: the plain read is the model (see "The voice level
+    // hangs on when the output shift takes effect" in docs/HARDWARE.md).
+    TMS_INLINE int32_t upper_d2(int unit, int path = 1) const {
+        if (!study_shift) return mac_upper(mac_d2[unit]);
+        return mac_upper_s(mac_d2[unit], core->study_pick_shift(shift_d2[unit], output_shift(), pc, path, true));
+    }
+    TMS_INLINE uint32_t lower_d2(int unit) const {
+        if (!study_shift) return mac_lower(mac_d2[unit]);
+        return mac_lower_s(mac_d2[unit], core->study_pick_shift(shift_d2[unit], output_shift(), pc, 1, false));
+    }
+
+    uint32_t cmem_index(uint32_t address) const;
+    uint32_t dmem_index(uint32_t address) const;
+    uint32_t cmem_operand(uint32_t word) const;
+    uint32_t dmem_operand(uint32_t word) const;
+    uint32_t xmem_index(uint32_t address) const;
+
+    void step_word(uint32_t word, bool fast);
+    void primary(uint32_t word);
+    void secondary(uint32_t word);
+    void post_increment(uint32_t word);
+    void jump(uint32_t word);
+    void pipeline();
+    // A register by a number known only at run time, without indexing the struct: an index the
+    // compiler cannot see through would keep every register of a translated half in memory.
+    TMS_INLINE void put_preg(int index, uint16_t value) {
+        switch (index) {
+        case 0: preg[0] = value; break; case 1: preg[1] = value; break; case 2: preg[2] = value; break; case 3: preg[3] = value; break;
+        case 4: preg[4] = value; break; case 5: preg[5] = value; break; case 6: preg[6] = value; break; case 7: preg[7] = value; break;
+        }
+    }
+    void queue_single(int target, uint16_t value);
+    void queue_dual(int target, uint32_t value);
+    void set_pointer(int target, uint16_t value);
+
+    int32_t settle_acc(int64_t value);
+    void load_acc(uint32_t word, int operation);
+    void alu(uint32_t word, int operation);
+    void multiply(int unit, int64_t lhs, int64_t rhs, bool negate);
+    void accumulate(int unit, int64_t lhs, int64_t rhs, bool negate);
+    void mac_shift(int unit, int amount);
+    void mac_set_upper(int unit, int32_t value);
+    void mac_set_lower(int unit, uint32_t value);
+};
+
+TMS_INLINE int Machine::output_shift() const {
     static const int table[4] = {0, 2, 4, -8};
     return table[field(CR1, 12, 2)];
 }
 
-int Core::round_bits() const {
+TMS_INLINE int Machine::round_bits() const {
     static const int table[8] = {0, 24, 28, 30, 32, 32, 28, 30};
     return table[field(CR1, 9, 3)];
 }
 
-int32_t Core::mac_upper_s(int64_t value, int shift) const {
+TMS_INLINE int32_t Machine::mac_upper_s(int64_t value, int shift) const {
     int64_t v = shift >= 0 ? value << shift : value >> -shift;
     int bits = round_bits();
     int64_t mask = 0;
@@ -67,7 +125,7 @@ int32_t Core::mac_upper_s(int64_t value, int shift) const {
     return s24((uint32_t)upper);
 }
 
-uint32_t Core::mac_lower_s(int64_t value, int shift) const {
+TMS_INLINE uint32_t Machine::mac_lower_s(int64_t value, int shift) const {
     int64_t v = shift >= 0 ? value << shift : value >> -shift;
     uint32_t lower = (uint32_t)(v & LOW24);
     if (flag(CR1, MOVM)) {
@@ -78,13 +136,13 @@ uint32_t Core::mac_lower_s(int64_t value, int shift) const {
     return lower;
 }
 
-uint32_t Core::cmem_index(uint32_t address) const {
+TMS_INLINE uint32_t Machine::cmem_index(uint32_t address) const {
     uint32_t a = address & 0xffff;
     if (!flag(CR1, LCMEM)) a = (a + coff) & 0xffff;
     return a & ((flag(CR1, EXT) && flag(CR1, EXTMEM)) ? 0x1ff : 0xff);
 }
 
-uint32_t Core::dmem_index(uint32_t address) const {
+TMS_INLINE uint32_t Machine::dmem_index(uint32_t address) const {
     uint32_t a = address & 0xffff;
     uint32_t size_mask = (flag(CR1, EXT) && !flag(CR1, EXTMEM)) ? 0x1ff : 0xff;
     if (!flag(CR1, LDMEM)) {
@@ -98,7 +156,7 @@ uint32_t Core::dmem_index(uint32_t address) const {
     return a & size_mask;
 }
 
-uint32_t Core::cmem_operand(uint32_t word) const {
+TMS_INLINE uint32_t Machine::cmem_operand(uint32_t word) const {
     uint32_t address = 0;
     switch ((word >> 12) & 3) {
     case 1: address = ca[(word & 0x800) ? 1 : 0]; break;
@@ -108,7 +166,7 @@ uint32_t Core::cmem_operand(uint32_t word) const {
     return cmem_index(address);
 }
 
-uint32_t Core::dmem_operand(uint32_t word) const {
+TMS_INLINE uint32_t Machine::dmem_operand(uint32_t word) const {
     uint32_t address = 0;
     switch ((word >> 12) & 3) {
     case 1: address = word; break;
@@ -117,7 +175,7 @@ uint32_t Core::dmem_operand(uint32_t word) const {
     return dmem_index(address);
 }
 
-uint32_t Core::xmem_index(uint32_t address) const {
+TMS_INLINE uint32_t Machine::xmem_index(uint32_t address) const {
     static const uint32_t sizes[4] = {0x4000, 0x8000, 0x10000, 0x10000};
     uint32_t size = sizes[field(CR3, 17, 2)];
     if (flag(CR3, XWORD)) size >>= 1;
@@ -125,7 +183,7 @@ uint32_t Core::xmem_index(uint32_t address) const {
     return (address + xoff) & (size - 1);
 }
 
-int32_t Core::settle_acc(int64_t value) {
+TMS_INLINE int32_t Machine::settle_acc(int64_t value) {
     if (flag(CR1, AOVM)) {
         if (value < -0x800000) { value = -0x800000; set_flag(CR1, AOV, true); }
         else if (value > 0x7fffff) { value = 0x7fffff; set_flag(CR1, AOV, true); }
@@ -139,7 +197,7 @@ int32_t Core::settle_acc(int64_t value) {
     return result;
 }
 
-void Core::load_acc(uint32_t word, int operation) {
+TMS_INLINE void Machine::load_acc(uint32_t word, int operation) {
     bool flag4 = word & 0x400000, flag8 = word & 0x800000;
     int32_t value = 0;
     switch ((word >> 24) & 3) {
@@ -158,7 +216,7 @@ void Core::load_acc(uint32_t word, int operation) {
     acc[flag4] = settle_acc(value);
 }
 
-void Core::alu(uint32_t word, int operation) {
+TMS_INLINE void Machine::alu(uint32_t word, int operation) {
     bool flag4 = word & 0x400000, flag8 = word & 0x800000;
     uint32_t top = word >> 24;
     int32_t lhs, rhs;
@@ -189,12 +247,12 @@ void Core::alu(uint32_t word, int operation) {
 }
 
 // Product of two 24-bit fractions, aligned as a MAC value: a * b * 2.
-void Core::multiply(int unit, int64_t lhs, int64_t rhs, bool negate) {
+TMS_INLINE void Machine::multiply(int unit, int64_t lhs, int64_t rhs, bool negate) {
     int64_t product = lhs * rhs * 2;
     mac[unit] = s52(negate ? -product : product);
 }
 
-void Core::accumulate(int unit, int64_t lhs, int64_t rhs, bool negate) {
+TMS_INLINE void Machine::accumulate(int unit, int64_t lhs, int64_t rhs, bool negate) {
     int64_t current = mac[unit];
     switch (field(CR1, 14, 2)) {
     case 1: current <<= 2; break;
@@ -205,41 +263,41 @@ void Core::accumulate(int unit, int64_t lhs, int64_t rhs, bool negate) {
     mac[unit] = s52(mac[unit] + current);
 }
 
-void Core::mac_shift(int unit, int amount) {
+TMS_INLINE void Machine::mac_shift(int unit, int amount) {
     mac[unit] = s52(amount < 0 ? mac[unit] >> -amount : mac[unit] << amount);
 }
 
-void Core::mac_set_upper(int unit, int32_t value) {
+TMS_INLINE void Machine::mac_set_upper(int unit, int32_t value) {
     uint64_t raw = (uint64_t)mac[unit] & LOW24;
     raw |= (uint64_t)((int64_t)value << 24);
     mac[unit] = s52((int64_t)raw);
 }
 
-void Core::mac_set_lower(int unit, uint32_t value) {
+TMS_INLINE void Machine::mac_set_lower(int unit, uint32_t value) {
     uint64_t raw = (uint64_t)mac[unit] & ~LOW24;
     raw |= value & LOW24;
     mac[unit] = s52((int64_t)raw);
 }
 
-void Core::queue_single(uint16_t* target, uint16_t value) { single_ptr[0] = target; single_value[0] = value & 0xfff; }
-void Core::queue_dual(uint16_t* target, uint32_t value) { dual_ptr[0] = target; dual_value[0] = value & 0xffffff; }
-void Core::set_pointer(uint16_t* target, uint16_t value) {
+TMS_INLINE void Machine::queue_single(int target, uint16_t value) { single_reg[0] = target; single_value[0] = value & 0xfff; }
+TMS_INLINE void Machine::queue_dual(int target, uint32_t value) { dual_reg[0] = target; dual_value[0] = value & 0xffffff; }
+TMS_INLINE void Machine::set_pointer(int target, uint16_t value) {
     if (options.queued_pointer_load) queue_single(target, value);
-    else *target = value;
+    else preg[target] = value;
 }
 
-void Core::pipeline() {
-    if (dual_ptr[1]) { dual_ptr[1][0] = dual_value[1] & 0xfff; dual_ptr[1][1] = (dual_value[1] >> 12) & 0xfff; }
-    if (single_ptr[1]) *single_ptr[1] = single_value[1];
-    dual_ptr[1] = dual_ptr[0]; dual_value[1] = dual_value[0];
-    single_ptr[1] = single_ptr[0]; single_value[1] = single_value[0];
-    dual_ptr[0] = nullptr;
-    single_ptr[0] = nullptr;
+TMS_INLINE void Machine::pipeline() {
+    if (dual_reg[1] >= 0) { put_preg(dual_reg[1], dual_value[1] & 0xfff); put_preg(dual_reg[1] + 1, (dual_value[1] >> 12) & 0xfff); }
+    if (single_reg[1] >= 0) put_preg(single_reg[1], single_value[1]);
+    dual_reg[1] = dual_reg[0]; dual_value[1] = dual_value[0];
+    single_reg[1] = single_reg[0]; single_value[1] = single_value[0];
+    dual_reg[0] = -1;
+    single_reg[0] = -1;
 }
 
 static inline int64_t as_unsigned(int32_t value) { return (int64_t)(uint32_t)u24(value); }
 
-void Core::primary(uint32_t word) {
+TMS_INLINE void Machine::primary(uint32_t word) {
     uint32_t op = word >> 24;
     bool flag4 = word & 0x400000, flag8 = word & 0x800000;
     int unit = flag4;  // MAC unit for multiply groups
@@ -269,12 +327,12 @@ void Core::primary(uint32_t word) {
         break;
     }
     case 0x1d:
-        if (flag8) { unknown[word & 0xffc00000]++; break; }
+        if (flag8) { core->note_unknown(word & 0xffc00000); break; }
         acc[flag4] = 0;
         settle_acc(0);
         break;
     case 0x1e:
-        if (flag4) { unknown[word & 0xffc00000]++; break; }
+        if (flag4) { core->note_unknown(word & 0xffc00000); break; }
         acc[1] = mac_upper(mac[flag8]);
         acc[0] = s24(mac_lower(mac[flag8]));
         break;
@@ -282,7 +340,7 @@ void Core::primary(uint32_t word) {
         if (flag8) {
             uint32_t divisor;
             if (flag4) {
-                if (!options.divide_1fc) { unknown[word & 0xffc00000]++; break; }
+                if (!options.divide_1fc) { core->note_unknown(word & 0xffc00000); break; }
                 divisor = alu_last;
             } else {
                 divisor = u24(dmem[dmem_operand(word)]);
@@ -328,7 +386,7 @@ void Core::primary(uint32_t word) {
     case 0x3c: alu(word, flag8 ? OpSub : OpAdd); break;
     case 0x3d: alu(word, flag8 ? OpOr : OpAnd); break;
     case 0x3e:
-        if (flag8 && !options.compare_3e) unknown[word & 0xffc00000]++;
+        if (flag8 && !options.compare_3e) core->note_unknown(word & 0xffc00000);
         else alu(word, flag8 ? OpCmp : OpXor);
         break;
 
@@ -357,7 +415,7 @@ void Core::primary(uint32_t word) {
             multiply(unit, low, pick(d, is_unsigned), negate);
             if (options.maclo_shift) mac[unit] >>= 24;
         } else {
-            unknown[word & 0xff000000]++;
+            core->note_unknown(word & 0xff000000);
         }
         break;
 
@@ -402,11 +460,11 @@ void Core::primary(uint32_t word) {
     }
     case 0x72: mac_shift(unit, flag8 ? 1 : -1); break;
     case 0x73:
-        if (flag8) unknown[word & 0xffc00000]++;
+        if (flag8) core->note_unknown(word & 0xffc00000);
         else mac[unit] = 0;
         break;
     case 0x74:
-        if (flag8 || flag4) { unknown[word & 0xffc00000]++; break; }
+        if (flag8 || flag4) { core->note_unknown(word & 0xffc00000); break; }
         mac[0] = mac[1] = 0;
         mac_d1[0] = mac[0];
         mac_d1[1] = mac[1];
@@ -428,25 +486,25 @@ void Core::primary(uint32_t word) {
     case 0xc1: {
         uint16_t value = word & 0xfff;
         switch ((word >> 16) & 0xff) {
-        case 0x00: queue_single(&da[0], value); break;
-        case 0x08: queue_single(&da[1], value); break;
-        case 0x10: queue_single(&dir[0], value); break;
-        case 0x18: queue_single(&dir[1], value); break;
-        case 0x20: queue_single(&ca[0], value); break;
-        case 0x28: queue_single(&ca[1], value); break;
-        case 0x30: queue_single(&cir[0], value); break;
-        case 0x38: queue_single(&cir[1], value); break;
-        case 0x40: if (!flag(CR1, ACCN)) queue_single(&ca[0], value); break;
-        case 0x48: if (!flag(CR1, ACCN)) queue_single(&ca[1], value); break;
-        default: unknown[word & 0xffff0000]++; break;
+        case 0x00: queue_single(PDA, value); break;
+        case 0x08: queue_single(PDA + 1, value); break;
+        case 0x10: queue_single(PDIR, value); break;
+        case 0x18: queue_single(PDIR + 1, value); break;
+        case 0x20: queue_single(PCA, value); break;
+        case 0x28: queue_single(PCA + 1, value); break;
+        case 0x30: queue_single(PCIR, value); break;
+        case 0x38: queue_single(PCIR + 1, value); break;
+        case 0x40: if (!flag(CR1, ACCN)) queue_single(PCA, value); break;
+        case 0x48: if (!flag(CR1, ACCN)) queue_single(PCA + 1, value); break;
+        default: core->note_unknown(word & 0xffff0000); break;
         }
         break;
     }
-    case 0xc2: queue_dual(da, word); break;
-    case 0xc3: queue_dual(dir, word); break;
-    case 0xc4: queue_dual(ca, word); break;
-    case 0xc5: queue_dual(cir, word); break;
-    case 0xc6: if (!flag(CR1, ACCN)) queue_dual(ca, word); break;
+    case 0xc2: queue_dual(PDA, word); break;
+    case 0xc3: queue_dual(PDIR, word); break;
+    case 0xc4: queue_dual(PCA, word); break;
+    case 0xc5: queue_dual(PCIR, word); break;
+    case 0xc6: if (!flag(CR1, ACCN)) queue_dual(PCA, word); break;
     case 0xc7: doff = word & 0xfff; dcirc = (word >> 12) & 0xfff; break;
     case 0xc8: coff = word & 0xfff; ccirc = (word >> 12) & 0xfff; break;
     case 0xca: acc[0] = s24(word); settle_acc(acc[0]); break;
@@ -473,12 +531,12 @@ void Core::primary(uint32_t word) {
     case 0xee: sp--; pc = stack[sp & 3]; set_flag(CR2, FREE, true); rptc = 0; insn_cycles = 2; break;
     default:
         if (op >= 0xf0) jump(word);
-        else unknown[word & 0xff000000]++;
+        else core->note_unknown(word & 0xff000000);
         break;
     }
 }
 
-void Core::jump(uint32_t word) {
+TMS_INLINE void Machine::jump(uint32_t word) {
     uint32_t condition = (word >> 20) & 0x7c;
     bool is_call = (word >> 24) >= 0xf8;
     bool taken = false;
@@ -497,7 +555,7 @@ void Core::jump(uint32_t word) {
     case 0x48: taken = flag(CR1, MOVL); break;
     case 0x50: taken = flag(CR1, MOVR); break;
     case 0x58: taken = bio; break;
-    default: unknown[word & 0xfff00000]++; break;
+    default: core->note_unknown(word & 0xfff00000); break;
     }
     insn_cycles = condition == 0 ? 2 : (condition == 8 || condition == 0xc) ? 4 : 3;
     if (taken) {
@@ -506,11 +564,10 @@ void Core::jump(uint32_t word) {
     }
 }
 
-void Core::secondary(uint32_t word) {
+TMS_INLINE void Machine::secondary(uint32_t word) {
     uint32_t op = (word >> 16) & 0x3f;
     bool flag4 = word & 0x4000, flag8 = word & 0x8000;
     int args = (word >> 14) & 3;
-    int32_t* target = nullptr;
 
     switch (op) {
     case 0x00: break;
@@ -526,25 +583,25 @@ void Core::secondary(uint32_t word) {
         if (flag8) cmem[cmem_operand(word)] = s24(lower_d2(flag4));
         else dmem[dmem_operand(word)] = s24(lower_d2(flag4));
         break;
-    case 0x04: set_pointer(&da[flag8], acc[flag4] & 0xfff); break;
-    case 0x05: set_pointer(&ca[flag8], acc[flag4] & 0xfff); break;
+    case 0x04: set_pointer(PDA + flag8, acc[flag4] & 0xfff); break;
+    case 0x05: set_pointer(PCA + flag8, acc[flag4] & 0xfff); break;
     case 0x06: {
         uint32_t value = (uint32_t)cmem[cmem_operand(word)];
-        uint16_t* pair = args == 0 ? da : args == 1 ? dir : args == 2 ? ca : cir;
+        int pair = args * 2;  // da, dir, ca, cir in preg order
         if (options.queued_pointer_load) queue_dual(pair, value);
-        else { pair[0] = value & 0xfff; pair[1] = (value >> 12) & 0xfff; }
+        else { preg[pair] = value & 0xfff; preg[pair + 1] = (value >> 12) & 0xfff; }
         break;
     }
     case 0x07: {
-        uint16_t* pair = args == 0 ? da : args == 1 ? dir : args == 2 ? ca : cir;
-        cmem[cmem_operand(word)] = s24((uint32_t)pair[1] << 12 | pair[0]);
+        int pair = args * 2;
+        cmem[cmem_operand(word)] = s24((uint32_t)preg[pair + 1] << 12 | preg[pair]);
         break;
     }
-    case 0x08: set_pointer(&(flag4 ? dir : da)[flag8], cmem[cmem_operand(word)] & 0xfff); break;
-    case 0x09: set_pointer(&(flag4 ? cir : ca)[flag8], cmem[cmem_operand(word)] & 0xfff); break;
+    case 0x08: set_pointer((flag4 ? PDIR : PDA) + flag8, cmem[cmem_operand(word)] & 0xfff); break;
+    case 0x09: set_pointer((flag4 ? PCIR : PCA) + flag8, cmem[cmem_operand(word)] & 0xfff); break;
     case 0x0a: case 0x0b: {
-        uint16_t* regs[4][2] = {{&da[0], &ca[0]}, {&dir[0], &cir[0]}, {&da[1], &ca[1]}, {&dir[1], &cir[1]}};
-        cmem[cmem_operand(word)] = *regs[args][op == 0x0b];
+        static const int regs[4][2] = {{PDA, PCA}, {PDIR, PCIR}, {PDA + 1, PCA + 1}, {PDIR + 1, PCIR + 1}};
+        cmem[cmem_operand(word)] = preg[regs[args][op == 0x0b]];
         break;
     }
     case 0x0c: case 0x0d: {
@@ -567,7 +624,7 @@ void Core::secondary(uint32_t word) {
         switch (args) {
         case 0: t_reg = dmem[dmem_operand(word)]; break;
         case 2: dmem[dmem_operand(word)] = xrd; break;
-        default: unknown[word & 0x3fc000]++; break;
+        default: core->note_unknown(word & 0x3fc000); break;
         }
         break;
     case 0x21:
@@ -634,19 +691,18 @@ void Core::secondary(uint32_t word) {
             noise_state ^= noise_state << 5;
             dmem[dmem_operand(word)] = s24(noise_state);
         } else {
-            unknown[0x80000000u | (op << 16)]++;
+            core->note_unknown(0x80000000u | (op << 16));
         }
         break;
     case 0x38: case 0x39: case 0x3a: case 0x3b:
         break;
     default:
-        unknown[0x80000000u | (op << 16)]++;
+        core->note_unknown(0x80000000u | (op << 16));
         break;
     }
-    (void)target;
 }
 
-void Core::post_increment(uint32_t word) {
+TMS_INLINE void Machine::post_increment(uint32_t word) {
     int mode = (word >> 12) & 3;
     int high = (word >> 8) & 0xf, low = (word >> 4) & 0xf;
     if (mode & 2) {
@@ -665,13 +721,13 @@ void Core::post_increment(uint32_t word) {
     }
 }
 
-void Core::step() {
-    uint32_t word = pmem[pc];
+// One word. In the translated code (fast) the word is a constant and the options are the engine's.
+TMS_INLINE void Machine::step_word(uint32_t word, bool fast) {
     // The voice output adds of the OB-12 programs, see "Bus sum saturates" in docs/HARDWARE.md.
     bool bus_sum = options.bus_sum_saturates && (word == 0xa13b2122 || word == 0xa13b2139 || word == 0x2186a136 || word == 0x2186a14d || word == 0x210921e2 || word == 0x21a6b000);
     bool plain = flag(CR1, AOVM);
     if (bus_sum) set_flag(CR1, AOVM, true);
-    if (rptc && pc == rep_end) { pc = rep_start; rptc--; }
+    if (!fast && rptc && pc == rep_end) { pc = rep_start; rptc--; }  // the translated programs have no repeat
     else pc = (pc + 1) & 0x1ff;
 
     pipeline();
@@ -720,5 +776,108 @@ void Core::step() {
         }
     }
 }
+
+
+Core::Core(const Options& chosen) : xmem(chosen.xmem_words > 0x10000 ? chosen.xmem_words : 0x10000, 0), options(chosen) { reset(); }
+
+void Core::reset() {
+    pc = 0;
+    sp = 0;
+    rptc = 0;
+    xmem_read_address = 0;
+    xmem_read_cycles = 0;
+    cr[CR0] = 0xAA9BAD;
+    cr[CR1] = 0x810100;
+    cr[CR2] = 0x30FF00;
+    cr[CR3] = 0xE50000;
+    for (int i = 0; i < 2; i++) { single_reg[i] = -1; dual_reg[i] = -1; }
+}
+
+void Core::load_control(const uint8_t* h) {
+    for (int i = 0; i < 4; i++) cr[i] = h[i * 3] << 16 | h[i * 3 + 1] << 8 | h[i * 3 + 2];
+}
+
+void Core::note_unknown(uint32_t key) { unknown[key]++; }
+
+int Core::study_pick_shift(int product_shift, int now_shift, int at_pc, int path, bool count) const {
+    int here = (at_pc - 1) & 0x1ff;
+    if (count && product_shift != now_shift) shift_mismatch[here]++;
+    if (!options.shift_with_product || !(options.shift_paths & path)) return now_shift;
+    if (!shift_pcs.empty()) {
+        bool listed = false;
+        for (int p : shift_pcs) if (p == here) listed = true;
+        if (!listed) return now_shift;
+    }
+    return product_shift;
+}
+
+int32_t Core::mac_upper(int64_t value) const { return Machine(const_cast<Core&>(*this)).mac_upper(value); }
+uint32_t Core::mac_lower(int64_t value) const { return Machine(const_cast<Core&>(*this)).mac_lower(value); }
+uint32_t Core::study_cmem(uint32_t word) const { return Machine(const_cast<Core&>(*this)).cmem_operand(word); }
+uint32_t Core::study_dmem(uint32_t word) const { return Machine(const_cast<Core&>(*this)).dmem_operand(word); }
+uint32_t Core::study_xmem(uint32_t address) const { return Machine(const_cast<Core&>(*this)).xmem_index(address); }
+
+// Any program, word by word.
+void Core::run_steps(int steps) {
+    Machine m(*this);
+    while (steps-- > 0) m.step_word(m.pmem[m.pc], false);
+    m.store();
+}
+
+// What a translated half takes for granted at its first word: nothing queued for the address
+// registers, no XMEM read on its way, no repeat, and the CR1 mode bits its translation assumed.
+bool Core::fast_ready(int half) const {
+    return !study_shift && rptc == 0 && xmem_read_cycles == 0 && single_reg[0] < 0 && single_reg[1] < 0 && dual_reg[0] < 0 && dual_reg[1] < 0
+        && (cr[CR1] & fast_mask[half]) == fast_value[half];
+}
+
+void Core::run(int steps) {
+    while (steps > 0) {
+        if (fast_program >= 0 && steps >= 256 && (pc & 0xff) == 0) {
+            int half = pc >> 8;
+            if (fast_ready(half)) { (this->*fast_table[fast_program][half])(); steps -= 256; fast_halves++; continue; }
+        }
+        int n = fast_program >= 0 ? 1 : steps;  // with a translation, look again after each word
+        run_steps(n);
+        steps -= n;
+        slow_steps += n;
+    }
+}
+
+// The engine's options, which the translated code is compiled for.
+static bool engine_options(const Options& o) {
+    return o.audio_port_writes && o.true_dmem_ring && o.lock_delay && o.maclo_multiply && o.divide_1fc && o.noise_generator
+        && o.late_mode_change && o.compare_3e && o.maclo_shift && o.maclo_unsigned && o.queued_pointer_load && o.bus_sum_saturates
+        && o.reuse_coefficient && o.late_saturation_mode && o.xread_flush && o.late_mode_mask == 0xf && o.shift_with_product == 0;
+}
+
+// One translated half: the registers come onto the stack, 256 constant words run in a line, the
+// registers go back. FAST_ASSUME tells the compiler what fast_ready() and select_fast() checked.
+#if defined(__clang__)
+#define FAST_ASSUME(x) __builtin_assume(x)
+#else
+#define FAST_ASSUME(x) (void)0
+#endif
+#define FAST_ENTER(mask, value) \
+    Machine m(*this); \
+    FAST_ASSUME(m.options.audio_port_writes && m.options.true_dmem_ring && m.options.lock_delay && m.options.maclo_multiply); \
+    FAST_ASSUME(m.options.divide_1fc && m.options.noise_generator && m.options.late_mode_change && m.options.compare_3e); \
+    FAST_ASSUME(m.options.maclo_shift && m.options.maclo_unsigned && m.options.queued_pointer_load && m.options.bus_sum_saturates); \
+    FAST_ASSUME(m.options.reuse_coefficient && m.options.late_saturation_mode && m.options.xread_flush); \
+    FAST_ASSUME(m.options.late_mode_mask == 0xf && m.options.shift_with_product == 0 && !m.study_shift); \
+    FAST_ASSUME(m.rptc == 0 && m.xmem_read_cycles == 0 && m.single_reg[0] < 0 && m.single_reg[1] < 0 && m.dual_reg[0] < 0 && m.dual_reg[1] < 0); \
+    FAST_ASSUME((m.cr[1] & (mask)) == (value));
+#define W(word) m.step_word(word, true);
+#define FAST_LEAVE m.store();
+
+// The OB-12's DSP programs translated, made by tools/gen_fast.py from rom/dsp into build/
+// (firmware stays out of git). Without the file every program runs word by word.
+#if defined(__has_include) && __has_include("tms_fast.inc") && !defined(TMS_NO_FAST)
+#include "tms_fast.inc"
+#else
+void Core::fast_0a() {} void Core::fast_0b() {} void Core::fast_1a() {} void Core::fast_1b() {} void Core::fast_2a() {} void Core::fast_2b() {}
+const Core::FastHalf Core::fast_table[][2] = {{&Core::fast_0a, &Core::fast_0b}};
+void Core::select_fast() { fast_program = -1; }
+#endif
 
 }  // namespace tms
