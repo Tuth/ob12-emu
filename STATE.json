@@ -38,7 +38,7 @@
     "dsp_bench": "build tools/dsp_bench.cpp with build/tms57070.obj; dsp_bench rom/dsp 0: about 13 ns a step, state DD531EB0 (4: 39D4251A) while the core's behaviour is unchanged"
   },
   "status": {
-    "phase": "XMEM read time 5 words: right chorus crackle gone, reverb taps in place; Osc2 wave keys in order",
+    "phase": "XMEM read time 5 words; Osc2 wave keys; thread layout without the Master thread",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -91,7 +91,8 @@
       "Display: font 1 (program name) in Handel Gothic, proportional, 16 rows; data dial and knob light line animated",
       "XMEM read data in XRD after 5 words (firmware's own read and take pattern): chorus right channel junk -38 to -55 dB or better, reverb taps no longer shifted by one; reference 7a47ad74",
       "Panel: Osc2 Wave 1 and Wave 3 keys exchanged back (BUT5, BUT3), measured against the lamps",
-      "A-017 Osc Common sliders: Split routing takes the filter inputs before the balance mix (DASP0 pointers C129 = 48, C12D = 9B from the Slave); firmware true, Serial makes the balance work"
+      "A-017 Osc Common sliders: Split routing takes the filter inputs before the balance mix (DASP0 pointers C129 = 48, C12D = 9B from the Slave); firmware true, Serial makes the balance work",
+      "Threads: Master's own thread removed, layout a setting (OB12_THREADS); about 0.7 of a core less at real time in both machine states, output identical"
     ],
     "blocked": []
   },
@@ -105,7 +106,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "CPU: 3.3 cores at real time = 1.57 DSP + 0.65 CPUs + 1.1 waiting. Next: translate the DSP programs with the CR1 mode bits followed per word; fewer, fuller threads. OB12_ONE_CPU=1 gives 2.65 cores now at 1.54 x margin (Thor to decide the default). Constant word core tried, no gain, dropped",
+    "CPU: both CPUs are 0.13 of a core; the five DSP cores are nearly all the work (6.6 us a sample each alone, 9-10 in the engine's slow state). Next: translate the DSP programs with the CR1 mode bits followed per word. Measure only in turn, several rounds: the machine has a fast and a slow state. Fast state margin of the new thread layout not confirmed",
     "A-017 in Split routing: Osc 2 through filter 2 is hardly heard; look at filter 2's settings and its output level before calling it right",
     "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
     "Reverb, delay and chorus changed with the XMEM read time: listen against a unit's recording",
@@ -153,5 +154,5 @@
   "reference_md5": "7a47ad74c1612850a09ab8639650b691",
   "host_bursts": "Host update words taken in per chip select (16 words), at the next sample start. A-018 pops gone; first note after program change still has one spike. OB12_HOST_SINGLE=1 old model.",
   "controllers": "VST3 IMidiMapping: CC 0-127, aftertouch, pitch bend forwarded to the Master.",
-  "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next5; OB12_XREAD_CYCLES=0 in ob12_system is the old table."
+  "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next6 (with the new thread layout); OB12_XREAD_CYCLES=0 in ob12_system is the old table."
 }

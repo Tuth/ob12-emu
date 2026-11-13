@@ -2427,3 +2427,46 @@ What would lower the floor: a translator that follows the mode bits through each
 secondaries 28-2D that set them are constants in the word), so a word's shift, rounding and
 saturation are known when it is translated; and fewer, fuller threads (both CPUs on one, the chips
 two to a thread: about 2.4 cores by arithmetic, margin 1.54 x). Not done.
+
+## Threads: the Master's own thread is gone (measured); corrections to the CPU section above
+
+Corrections first. "The two CPUs: 0.65 of a core (by arithmetic)" was wrong. Measured alone, linked
+as in the engine, 167 cycle slices, from 14 s with three notes: Master 0.061 s of work per second of
+sound (run 0.049, tick 0.012; 3.95M instructions a second, 12.4 ns each), Slave 0.073 s (2.81M,
+22.1 ns): 0.13 of a core together, 2.8 us a sample. And "13.1 ns a step" holds for a chip alone on a
+quiet machine; inside the engine a chip took 8.9 to 10.4 us a sample (17 to 20 ns a step) in the runs
+of this round (`OB12_TIME_LOG=1`, new: time stamp counter per part, us a sample). So the real work
+was about 1.6 to 2.2 cores and the rest waiting.
+
+The Master's thread did 1.3 us of work in a sample of 8 to 10 us and spun for the rest; the caller's
+thread, with the Slave, the same. The layout is now a setting (`OB12_THREADS`, groups by /, chips by
+comma, first group the caller's thread, `cpu` for a Master thread): default `/0/1/2/3/4`, both CPUs
+on the caller's thread and a worker per chip. `OB12_ONE_CPU` is no longer read; the old layout is
+`OB12_THREADS=/cpu/0/1/2/3/4`. Every layout gives the same output, MD5 7a47ad74.
+
+`pace_test`, cores busy, 0 ring empties in all of these:
+
+| Machine state | Old layout | Now |
+|---|---|---|
+| Fast (three runs each, the round before) | 3.21 to 3.39 | 2.63 to 2.70 |
+| Slow (a media player running; three rounds in turn) | 5.50 to 5.74 | 4.80 to 4.93 |
+
+Offline, slow state: 1.69 x old, 1.68 x now. One fast state run gave 1.54 x against 2.54 x; not
+repeated, the machine went slow for the rest of the round, so the margin in the fast state is open.
+The last two rounds, with the state changing between runs, gave 4.08 and 2.82 now against 3.35 and
+3.04 old: single runs on this machine do not decide anything.
+
+Layouts that put more on one thread lose (slow state): the effects chip on the caller's thread
+1.22 x and ring empties; two chips to a worker 0.83 x, below real time. A chip is 9 to 10 us of a
+20.8 us sample there, so two do not fit with any margin. "About 2.4 cores, margin 1.54 x" above was
+arithmetic from the quiet benchmark and does not hold.
+
+The slow state itself: the benchmark of one chip on one thread does not change (13.8 ns), the engine
+with its six threads does (chips 6.6 to 10 us). `OB12_SPREAD` (study): 1, an ideal processor per
+worker on separate physical cores, changes nothing; 2, a hard affinity, runs faster offline (1.96 to
+2.12 x against 1.50 to 1.61) but stalls 26 ms when something else takes a pinned core (5 ring
+empties in 10 s). Off by default. So the slow state looks like our threads sharing physical cores
+with other work; not shown.
+
+What is left: one thread needs the whole sample's work under about 13 us; it is 35 to 50 us, nearly
+all of it the five DSP cores. Only a faster DSP core gets there.

@@ -152,7 +152,15 @@ struct Engine::Impl {
     std::atomic<bool> stop{false};
     std::vector<std::thread> workers;
     std::string error;
-    bool one_cpu_thread = getenv("OB12_ONE_CPU") != nullptr;
+    // Which thread runs what. groups[0] is the caller's thread: it runs both CPUs, then its own
+    // chips; every other group is a worker. Chips of one batch do not read each other, so any
+    // grouping gives the same output. The work is about 6.6 us a sample per chip and 2.8 us for
+    // both CPUs; a thread that finishes early spins for the others, so fewer, fuller threads
+    // cost less at real time and leave less margin. See "Threads" in docs/HARDWARE.md.
+    // OB12_THREADS=4/0/1/2/3 style: groups separated by /, chips by commas; "cpu" as a group
+    // gives the Master its own thread as before (OB12_THREADS=/cpu/0/1/2/3/4 is the old layout).
+    std::vector<std::vector<int>> groups;
+    bool master_thread = false;
     int32_t* out = nullptr;
     int made = 0;
 
@@ -324,7 +332,7 @@ struct Engine::Impl {
             }
         }
         slice = k % 3 == 2 ? 166 : 167;  // 16 MHz: 500 cycles per three half frames
-        if (one_cpu_thread) {
+        if (!master_thread) {
             m->run(slice); m->tick(m->executed());
             s->run(slice); s->tick(s->executed());
         } else {
@@ -344,6 +352,7 @@ struct Engine::Impl {
     // One chip through both half frames of a batch, on its own worker.
     void chip_batch(int n) {
         long b = dsp_batch;
+        uint64_t began = __rdtsc();
         int now = b & 1, before = now ^ 1;
         Host& h = host[n];
         tms::Core* d = h.dsp;
@@ -368,25 +377,33 @@ struct Engine::Impl {
             if (h.running) for (int i = 0; i < 256; i++) d->step();
             memcpy(snap[now][part][n], d->ax, sizeof d->ax);
         }
+        spent_chip[n].ticks += __rdtsc() - began;
     }
 
     long dsp_batch = 0;
+    // Study (OB12_TIME_LOG): time stamp counter ticks spent in each part, summed over the run.
+    struct alignas(64) Spent { uint64_t ticks = 0; } spent_chip[5], spent_cpu, spent_wait;
 
     void next_batch() {
         filling = batch & 1;
+        uint64_t began = __rdtsc();
         half = 0;
         cpu_slice();
         half = 1;
         cpu_slice();
+        uint64_t slices = __rdtsc();
+        spent_cpu.ticks += slices - began;
         if (batch > 0) {
-            dsp_gate.wait();
+            if (groups.size() > 1) dsp_gate.wait();
+            spent_wait.ticks += __rdtsc() - slices;
             const int32_t* frame = snap[(batch - 1) & 1][1][4][1];  // MOUT after the odd half frame
             out[made * 2] = frame[0];
             out[made * 2 + 1] = frame[1];
             made++;
         }
         dsp_batch = batch;
-        dsp_gate.open(5);
+        if (groups.size() > 1) dsp_gate.open((int)groups.size() - 1);
+        for (int chip : groups[0]) chip_batch(chip);
         batch++;
     }
 };
@@ -433,7 +450,23 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
         for (int chip = 0; chip < 5; chip++) e.held[e.filling][chip][e.half].push_back({0, true});
     };
 
-    e.workers.emplace_back([&e]() {
+    // Default: both CPUs on the caller's thread, a worker per chip. The Master's own thread spent
+    // most of its time spinning: about 0.7 of a core less without it, fast machine state or slow.
+    const char* layout = getenv("OB12_THREADS");
+    if (!layout) layout = "/0/1/2/3/4";
+    e.groups.assign(1, {});
+    for (const char* c = layout; *c; c++) {
+        if (*c == '/') e.groups.emplace_back();
+        else if (!strncmp(c, "cpu", 3)) { e.master_thread = true; e.groups.pop_back(); c += 2; if (c[1] == '/') c++; e.groups.emplace_back(); }
+        else if (*c >= '0' && *c <= '4') e.groups.back().push_back(*c - '0');
+    }
+    {
+        bool seen_chip[5] = {};
+        for (auto& g : e.groups) for (int chip : g) seen_chip[chip] = true;
+        for (int chip = 0; chip < 5; chip++) if (!seen_chip[chip]) e.groups[0].push_back(chip);  // every chip runs somewhere
+        for (size_t g = e.groups.size(); g-- > 1;) if (e.groups[g].empty()) e.groups.erase(e.groups.begin() + g);
+    }
+    if (e.master_thread) e.workers.emplace_back([&e]() {
         long seen = 0;
         for (;;) {
             wait_for(e.cpu_gate, seen, e.stop);
@@ -444,13 +477,22 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
             e.cpu_gate.done();
         }
     });
-    for (int n = 0; n < 5; n++) e.workers.emplace_back([&e, n]() {
+    // Study (OB12_SPREAD=1 hint, 2 hard): each worker on a physical core of its own. Two of our
+    // threads on the two halves of one core slow each other, the spinning one as much as a working one.
+    static int spread = getenv("OB12_SPREAD") ? atoi(getenv("OB12_SPREAD")) : 0;
+    for (size_t g = 1; g < e.groups.size(); g++) e.workers.emplace_back([&e, g]() {
+        if (spread) {
+            SYSTEM_INFO info; GetSystemInfo(&info);
+            DWORD logical = 2 * (DWORD)g % info.dwNumberOfProcessors;
+            if (spread == 2) SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)1 << logical);
+            else SetThreadIdealProcessor(GetCurrentThread(), logical);
+        }
         long seen = 0;
         for (;;) {
             wait_for(e.dsp_gate, seen, e.stop);
             if (e.stop) return;
             seen++;
-            e.chip_batch(n);
+            for (int chip : e.groups[g]) e.chip_batch(chip);
             e.dsp_gate.done();
         }
     });
@@ -536,6 +578,16 @@ long Engine::flash_writes() const { return impl->flash_count.load(std::memory_or
 
 Engine::~Engine() {
     if (getenv("OB12_CLOCK_LOG")) printf("clock: %.6f s of sound, Master %.6f s, Slave %.6f s at 16 MHz, ready at %.4f s\n", impl->k / 96000.0, impl->m->cycles_total / 16e6, impl->s->cycles_total / 16e6, impl->ready_at / 96000.0);
+    if (getenv("OB12_TIME_LOG")) {
+        // us per sample of sound, taking the counter at its nominal rate (the first 2 s calibrate it)
+        static double rate = 0;
+        if (!rate) { uint64_t a = __rdtsc(); Sleep(200); rate = (__rdtsc() - a) / 0.2; }
+        double samples = impl->batch ? (double)impl->batch : 1;
+        auto us = [&](uint64_t ticks) { return ticks / rate * 1e6 / samples; };
+        printf("us a sample: CPUs (both slices, with the Master wait if it has a thread) %.2f, wait for chips %.2f, chips", us(impl->spent_cpu.ticks), us(impl->spent_wait.ticks));
+        for (auto& c : impl->spent_chip) printf(" %.2f", us(c.ticks));
+        puts("");
+    }
     impl->stop = true;
     for (auto& t : impl->workers) t.join();
     if (impl->flash_dirty) impl->save_flash();
