@@ -47,7 +47,8 @@ static const PanelKey panel_keys[] = {
     {"Relative", -170, 560, 0, 2}, {"Hold", -68, 560, 0, 0},
     {"LFO1 Wave", 115, 256, 1, 7}, {"Common Osc", 582, 256, 1, 4},
     {"Osc1 Wave 1", 702, 256, 1, 3}, {"Osc1 Wave 2", 756, 256, 1, 2}, {"Osc1 Wave 3", 810, 256, 1, 1}, {"Osc1 PWM Source", 970, 256, 1, 0},
-    {"Osc2 Wave 1", 1211, 256, 5, 3}, {"Osc2 Wave 2", 1264, 256, 5, 4}, {"Osc2 Wave 3", 1318, 256, 5, 5},
+    // Measured against the lamps: BUT5 lights Osc2 Wave 1 (latch 7 bit 6), BUT4 Wave 2, BUT3 Wave 3.
+    {"Osc2 Wave 1", 1211, 256, 5, 5}, {"Osc2 Wave 2", 1264, 256, 5, 4}, {"Osc2 Wave 3", 1318, 256, 5, 3},
     {"Sync", 1399, 75, 5, 7}, {"Osc2 PWM Source", 1477, 256, 5, 2}, {"Osc2 KBD Track", 1559, 256, 5, 1},
     {"Filter1", 1692, 256, 5, 0}, {"Routing", 1785, 164, 6, 6}, {"Filter2", 1785, 256, 5, 6}, {"Autopan", 2481, 256, 6, 7},
     {"LFO2 Wave", 73, 609, 3, 7}, {"LFO2 Depth Select", 152, 609, 3, 3},

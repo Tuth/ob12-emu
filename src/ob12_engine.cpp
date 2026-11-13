@@ -422,6 +422,8 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     // DASP4 has 3 x 44C256 DRAM, 256K x 12 bits: 128K words of 24 bits in two accesses.
     tms::Options options4 = options;
     options4.xmem_words = 0x20000;
+    // An XMEM read's data is in XRD 5 words later, see "XMEM read time" in docs/HARDWARE.md.
+    options4.xread_cycles = 5;
     for (int n = 0; n < 5; n++) e.host[n].dsp = new tms::Core(n == 4 ? options4 : options);
     if (getenv("OB12_STUDY_SHIFT")) for (auto& h : e.host) h.dsp->study_shift = true;  // to time its cost
     e.s->on_dsp_byte = [&e](u8 selected, u8 data) {

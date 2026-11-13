@@ -33,6 +33,9 @@ struct Options {
     bool compare_3e = false;         // primary 3E flag 8 compares DMEM with CMEM, flags only
     uint32_t xmem_words = 0;  // the board's external RAM in words, a power of two; 0 = from CR3
     bool xread_flush = false;  // a new XMEM read lands the pending one in XRD first (read pipeline)
+    // Words from an XMEM read to its data in XRD; 0 = the public emulator's table by CR3. The OB-12
+    // effects program takes XRD 5 words after a read and expects the old value 2 words after one.
+    int xread_cycles = 0;
     bool late_saturation_mode = false;  // secondary 2D acts after the primary, like 28-2B
     bool reuse_coefficient = false;  // primary 43 multiplies DMEM by the last multiplier C word
     bool bus_sum_saturates = false;  // the OB-12 voice output adds clip instead of wrapping

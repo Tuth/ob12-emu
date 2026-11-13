@@ -34,6 +34,7 @@
 //   OB12_HOST_SINGLE=1  host update words take effect one by one, not together when the select ends
 //   OB12_XREAD_CANCEL=1  a new XMEM read cancels the pending one (old model)
 //   OB12_XMEM_CR3=1  DASP4 XMEM size from CR3 (32K words) instead of the board's 128K
+//   OB12_XREAD_CYCLES=n  words from a DASP4 XMEM read to its data in XRD (default 5; 0 = the old table, 9)
 //   OB12_EARLY_2D=1  secondary 2D before the primary: all LFOs stand still
 //   OB12_MACLO=1     primary 43 as low MAC word multiply, the old model
 //   OB12_POT_REST=v  value every pot reads when not moved, hex
@@ -245,6 +246,9 @@ int main(int argc, char** argv) {
     // DASP4 has 3 x 44C256 DRAM, 256K x 12 bits: 128K words of 24 bits in two accesses.
     tms::Options options4 = options;
     if (!getenv("OB12_XMEM_CR3")) options4.xmem_words = 0x20000;
+    // An XMEM read's data is in XRD 5 words later, see "XMEM read time" in docs/HARDWARE.md.
+    // OB12_XREAD_CYCLES=n tries another time; 0 is the old table (9 words here).
+    options4.xread_cycles = getenv("OB12_XREAD_CYCLES") ? atoi(getenv("OB12_XREAD_CYCLES")) : 5;
     for (int n = 0; n < 5; n++) host[n].dsp = new tms::Core(n == 4 ? options4 : options);
     if (getenv("OB12_SHIFT_PRODUCT") || getenv("OB12_SHIFT_MISMATCH") || getenv("OB12_SHIFT_PCS"))
         for (auto& h : host) h.dsp->study_shift = true;  // the shift studies, off in the engine

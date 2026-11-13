@@ -321,7 +321,7 @@ void Core::primary(uint32_t word) {
             }
             xmem_read_address = xmem_index((uint32_t)cmem[cmem_operand(word)]);
             int bus = field(CR3, 17, 2);
-            xmem_read_cycles = flag(CR3, XWORD) ? with_word[bus] : without[bus];
+            xmem_read_cycles = options.xread_cycles ? options.xread_cycles : flag(CR3, XWORD) ? with_word[bus] : without[bus];
         }
         break;
     case 0x3a: case 0x3b: case 0x3f: break;

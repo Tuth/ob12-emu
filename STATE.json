@@ -33,10 +33,11 @@
     "run_slave": "build/ob12_slave.exe rom 120000000 build/master_to_slave.bin",
     "run_slave_pass": "no STOP line; UART2 Master shows 11 and the version text",
     "core_compare": "build/core_compare.exe rom/dsp 2000 (needs a local public emulator copy)",
-    "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8"
+    "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8",
+    "tone": "OB12_MIDI_EVENTS=13:pc:10 OB12_AUX_TONE=400000 OB12_BUS_TONE=1 build/ob12_system.exe rom 19 15 build/tone.wav, then python tools/tone_junk.py build/tone.wav: junk below -50 dB on both sides"
   },
   "status": {
-    "phase": "LFOs run for the first time: secondary 2D after the primary; cutoff no longer pinned; editor size menu; 5 x 7 font",
+    "phase": "XMEM read time 5 words: right chorus crackle gone, reverb taps in place; Osc2 wave keys in order",
     "done": [
       "SysEx format, packing and checksum decoded for all 7 firmware files",
       "Hardware map corrected from the schematics: 2 CPUs, 5 TMS57070, ATF1500 PLD",
@@ -86,7 +87,9 @@
       "Panel: slider caps and knob faces taken out of the art and drawn at their values",
       "LEDs: Master shifts latch bytes on port 8 (bit 5 data, bit 6 clock), strobes 68FF80+n; 18 lamps mapped and drawn",
       "All 89 panel LEDs mapped (46 lamps, 43 indicators) from the service manual sheets and layouts",
-      "Display: font 1 (program name) in Handel Gothic, proportional, 16 rows; data dial and knob light line animated"
+      "Display: font 1 (program name) in Handel Gothic, proportional, 16 rows; data dial and knob light line animated",
+      "XMEM read data in XRD after 5 words (firmware's own read and take pattern): chorus right channel junk -38 to -55 dB or better, reverb taps no longer shifted by one; reference 7a47ad74",
+      "Panel: Osc2 Wave 1 and Wave 3 keys exchanged back (BUT5, BUT3), measured against the lamps"
     ],
     "blocked": []
   },
@@ -100,6 +103,9 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
+    "A-017 FM Bell: Osc Common Balance, Ring Mod, Noise and Osc1 FM sliders change nothing in the sound though C128/C126 are written; follow DASP0 118 (ACC0 = 0) back",
+    "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
+    "Reverb, delay and chorus changed with the XMEM read time: listen against a unit's recording",
     "Lamps Mono/Legato/Portamento/Unison dark: firmware LED image EC5B09 not updated on press; find the Master routine that sets it",
     "The Raver glide click: paired take-in tried (01b8766) and reverted: harness better, engine worse (3 spikes). Compare engine and harness per sample with the slot before another fix",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
@@ -142,7 +148,8 @@
     "2026-11-07 Thor: Resonance 127 stays firmware-true (damping 0, self-oscillation), no limiter"
   ],
   "lamps": "Dark lamps fixed: f2mc16 bank prefix now expires after the next instruction (JMP @A kept it). VST3 in build/next; PGO build pending.",
-  "reference_md5": "3c2d15f9399f304600b874fa530738e1",
+  "reference_md5": "7a47ad74c1612850a09ab8639650b691",
   "host_bursts": "Host update words taken in per chip select (16 words), at the next sample start. A-018 pops gone; first note after program change still has one spike. OB12_HOST_SINGLE=1 old model.",
-  "controllers": "VST3 IMidiMapping: CC 0-127, aftertouch, pitch bend forwarded to the Master."
+  "controllers": "VST3 IMidiMapping: CC 0-127, aftertouch, pitch bend forwarded to the Master.",
+  "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next5; OB12_XREAD_CYCLES=0 in ob12_system is the old table."
 }

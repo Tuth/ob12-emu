@@ -2313,3 +2313,64 @@ maximum level by the firmware's own table, and the parameter path (message, cell
 The remaining difference to the video (A-014 to A-015: about 3 dB there, 6.7 here) has no fault left
 to point at in the level path; the drive stage itself was decoded earlier and follows the firmware's
 coefficients. Taken as it stands; the plug-in's Output gain covers the overall level.
+
+## XMEM read time: 5 words, not 9 (firmware evidence, measured; not checked on silicon)
+
+Thor: A-017 Crystal PPG (timbre B-021 FM Bell) crackles on the right with the chorus on, not with
+it off; later the sound turned into loud digital noise (records/OB-12 brutal digital error.wav).
+
+Measured. A 440 Hz tone on the voice bus into DASP4 (`OB12_AUX_TONE=400000 OB12_BUS_TONE=1`, program
+A-017, `tools/tone_junk.py`), everything outside 400-480 Hz against the whole:
+
+| | Left | Right |
+|---|---|---|
+| Chorus on, before | -55 to -62 dB | -38 to -39 dB, lines at 440 +- 182 Hz |
+| Chorus off | -57 to -68 dB | -56 to -66 dB |
+| Chorus on, now | -53 to -67 dB | -55 to -67 dB |
+
+A-001 had the same on the right (440 +- 219 Hz, -34 to -39 dB): every program with chorus.
+
+Cause. The chorus reads each tap as a pair n, n+1 and interpolates: x[n] + f (x[n+1] - x[n]), f the
+low MAC word kept in C09A (left) and C09B (right). The right tap reads n+1 at 150 and takes XRD at
+156 (`242090CC`), six words later, with an XMEM write (155) between. The core gave XRD its data 9
+words after a read (the public emulator's table, CR3 bus field 2 with XWORD), or earlier when the
+next read flushed it (`xread_flush`). So at 156 XRD still held x[n], the difference was 0, and the
+right tap stepped a whole sample each time f wrapped: C09B moves 00F900 a sample, a wrap every
+263.2 samples, 182.4 Hz. The left tap was saved by the read at 14B, which flushed its n+1.
+
+The whole DASP4 program, every read (primary 39) and every take of XRD (secondary 20):
+- takes 1 or 2 words after a read expect the read before it (148, 14C, 152, 16E, 172, 178, 084);
+- 080 comes 3 words after 07D and 8 after 078: 18 reverb reads and 18 takes pair up one to one only
+  if 080 still gets 078, so the data is not there after 3 words;
+- the reverb reads every 5 words and takes XRD in the same word as the next read (087 to 0CD, 15
+  times); a secondary runs before its primary, so the flush came too late there and each take got
+  the read before the one meant: the reverb taps were shifted by one, 078's data went nowhere and
+  0CD's was never used. Takes at 6 words: 0D3, 156.
+So the data is in XRD 4 or 5 words after its read; both give the same output, bit for bit (measured,
+MD5 equal). 3 and 6 each differ. Option `xread_cycles`, 5 for DASP4 (`OB12_XREAD_CYCLES=n` in
+ob12_system, 0 = the old table). With 5 the firmware never starts a read while one is pending, so
+`xread_flush` no longer acts; it stays on. Only DASP4 has XMEM reads.
+
+A-017, one note, right channel above 12 kHz: peak 0.0259, kurtosis 10.1 before; 0.0097 and 5.1 now,
+equal to the left. Chorus, delay and reverb all sound different now: the reverb reads the taps it
+was written for.
+New reference, engine = `OB12_MIDI_NOTES=3c,40,43 ob12_system rom 16 13`: MD5
+7a47ad74c1612850a09ab8639650b691.
+
+The loud noise is not reproduced as a fault of the engine. Osc2 wave keys toggled 18 times, the
+Osc Common and Osc2 Wave Mix sliders moved, 4 to 8 notes held, old and new core: MOUT stays a
+normal signal (rms 0.03 to 0.30 of full scale, autopan swapping the sides every second). The
+recording fits the plug-in's output clipping: its Output gain was +12 dB over the analog stage's
+2.375, a factor 9.46. Our A-017 runs through that gain and a clip give rms 0.90 / 0.66 with 70% /
+30% of the samples at the rail, sides swapping every second; the recording has 0.92 / 0.49 and 45
+to 53% at the rail with the same swap. A-017 is a loud program: four notes at velocity 100 peak at
+0.4 to 0.6 of full scale before any gain. Not proven: a take with Output gain 0 dB would settle it.
+
+Open, measured: on A-017 the Osc Common sliders (Balance 1 Osc1/Osc2, Ring Mod, Noise) and Osc1 FM
+change nothing, the output is bit identical, though the display follows (BALANCE1 0 to 100) and the
+Master sends A0 21 v and the Slave ramps DASP0 C128 / C126 in 32 steps, as on A-001 where it works.
+DASP0 118 `42021A9B` multiplies C128 by D9B with ACC0 = 000000 on A-017 (E20BDE on A-001). Whether
+FM Bell's voice path really bypasses the balance or our core loses it is not known.
+
+Panel: the Osc2 Wave 1 and Wave 3 keys were exchanged (BUT5 lights Wave 1's lamp, latch 7 bit 6;
+BUT3 Wave 3's, bit 4; measured with `seq_test` t:key and t:dump). Osc1's keys were right.
