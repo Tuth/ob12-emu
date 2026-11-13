@@ -3,7 +3,9 @@ call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliar
 cd /d F:\Claude\OB-12
 if not exist build mkdir build
 set CC="C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64\bin\clang-cl.exe"
-set FLAGS=/O2 /clang:-O3 /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS /w /Isrc\shim /Isrc\f2mc16 /Isrc /FIemu.h
+set FLAGS=/O2 /clang:-O3 /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS /w /Isrc\shim /Isrc\f2mc16 /Isrc /Ibuild /FIemu.h
+rem The DSP programs translated for the core (build\tms_fast.inc); needs rom\dsp from ob12_carve.py.
+python tools\gen_fast.py rom\dsp build\tms_fast.inc
 %CC% %FLAGS% /c src\f2mc16\f2mc16.cpp /Fobuild\f2mc16.obj
 %CC% %FLAGS% /c src\tms57070\tms57070.cpp /Fobuild\tms57070.obj
 %CC% %FLAGS% /c src\ob12_master.cpp /Fobuild\ob12_master.obj

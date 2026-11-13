@@ -5,7 +5,7 @@ call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliar
 cd /d F:\Claude\OB-12
 set LLVM=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\Llvm\x64
 set CC="%LLVM%\bin\clang-cl.exe"
-set FLAGS=/O2 /clang:-O3 /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS /w /Isrc\shim /Isrc\f2mc16 /Isrc /FIemu.h
+set FLAGS=/O2 /clang:-O3 /EHsc /std:c++17 /D_CRT_SECURE_NO_WARNINGS /w /Isrc\shim /Isrc\f2mc16 /Isrc /Ibuild /FIemu.h
 if not exist build\pgo mkdir build\pgo
 %CC% %FLAGS% /clang:-fprofile-instr-generate /c src\f2mc16\f2mc16.cpp /Fobuild\pgo\f2mc16.obj
 %CC% %FLAGS% /clang:-fprofile-instr-generate /c src\tms57070\tms57070.cpp /Fobuild\pgo\tms57070.obj

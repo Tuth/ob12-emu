@@ -2588,3 +2588,60 @@ Not modelled, by choice or not yet:
 CS8402A, from its data sheet (Thor's CS8401.PDF, page 18, Table 3, rendered): M2 M1 M0 = 1 0 0 is
 "4 - Left/Right, I2S Compatible", 16 to 24 bits. So the transmitter takes the whole 24 bit word in
 the same format as the DAC. Closes that point of the audit; the channel status straps stay unread.
+
+## The DSP programs translated: one thread, 0.43 of a core (measured)
+
+Supersedes "a constant word core that did not pay" and "What is left: one thread needs ..." above.
+
+What the three programs are: 512 words each with no jump, call or repeat (no word at E0 or above),
+13, 13 and 3 conditional address loads, one CR write by a secondary, 56, 56 and 37 mode
+secondaries. So a half frame, 256 words from PC 000 or 100, is a straight line.
+
+What changed in `src/tms57070`:
+- The registers are a struct of their own (`Regs`; `Core` is one, so `core.acc`, `core.pc` read as
+  before). A run copies them into a `Machine` on the stack with pointers to the memories, steps,
+  and copies them back. Every step function is a `Machine` member, forced inline.
+- `tools/gen_fast.py` writes `build/tms_fast.inc` from rom/dsp (firmware words, outside git;
+  `build_master.bat` runs it): per program and half one function of 256 `step_word(constant)`
+  calls. It also follows the mode secondaries around the loop and gives each half the CR1 mode bits
+  it starts with (mask B9FE00 or B9FF00 on the voice programs).
+- `Core::run(steps)` enters a translated half when PC is 000 or 100 and `fast_ready()` holds:
+  no study switch, no repeat, no XMEM read on its way, nothing queued for the address registers,
+  CR1's mode bits as expected. The half's code is told the same as assumptions. Anything else runs
+  word by word, so a wrong guess of the generator costs speed and never output.
+  `Core::select_fast()` (after PMEM is loaded) compares all 512 words and the options.
+
+Why it works now and did not before: with the registers in a local struct the compiler keeps them
+in machine registers, follows the mode bits from word to word as constants, and drops the flag
+updates nobody reads. The first build of this still kept everything on the stack, 18 ns a step:
+the queued address register write indexed the struct by a run time number
+(`preg[dual_reg[1]]`), and one such index stops the compiler splitting the struct at all. Written
+as a switch over the eight registers (`put_preg`), 1.4 ns.
+
+Measured (`tools/dsp_bench`, 100M steps, noise in; word by word and translated must leave the same
+state, and do: FA417F6D, 356212FB, CBDD87BF), profile guided build:
+
+| Program | Word by word | Translated | |
+|---|---|---|---|
+| Voices, DASP0 | 13.1 ns a step | 1.26 | 10.4 x |
+| Voices, DASP1-3 | 12.9 | 1.18 | 11.0 x |
+| Effects, DASP4 | 12.1 | 3.43 | 3.5 x |
+
+The whole machine, bit for bit: `engine_test rom 16` and `OB12_MIDI_NOTES=3c,40,43 ob12_system rom
+16 13` both 7a47ad74c1612850a09ab8639650b691 as before (the harness steps word by word, so this
+also compares the two paths). Eight `seq_test` runs of 24 to 26 s against the engine of main
+(A-001, A-004, A-015, A-017, A-018, A-030, B-100 with a program change, 14 notes at once; pots,
+keys, pitch bend, mod wheel moved): all eight WAVs equal.
+
+`OB12_TIME_LOG`, us a sample: CPUs 3.25, chips 0.83, 0.71, 0.61, 0.59, 2.42: 8.4 of the 20.8 us.
+`pace_test`, 6 notes, 0 ring empties in every run:
+
+| Threads (`OB12_THREADS`) | Cores busy | Offline |
+|---|---|---|
+| One, `0,1,2,3,4`, the default now | 0.42 to 0.44 | 2.38 x |
+| Two, `4/0,1,2,3` | 0.58 | 4.03 x |
+| Six, `/0/1/2/3/4`, the default before | 1.07 to 1.17 | 6.0 x |
+| Before the translation, six threads | 2.63 to 2.70 | 2.5 x |
+
+The two CPUs are now the largest part, 3.25 us of 8.4: the next thing to make faster.
+VST3 with it: build/next7. Not yet played in a host.

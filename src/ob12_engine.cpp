@@ -105,6 +105,7 @@ struct Host {
                     const u8* w = h + 12 + i * 4;
                     dsp->pmem[i] = w[0] << 24 | w[1] << 16 | w[2] << 8 | w[3];
                 }
+                dsp->select_fast();  // a known program runs from its translation, see tms57070.h
                 state = Idle;
             }
             break;
@@ -374,7 +375,7 @@ struct Engine::Impl {
             }
             if (part == 0) h.sample_start();
             if (h.start_pending && part == 0) { h.start_pending = false; h.running = true; }
-            if (h.running) for (int i = 0; i < 256; i++) d->step();
+            if (h.running) d->run(256);
             memcpy(snap[now][part][n], d->ax, sizeof d->ax);
         }
         spent_chip[n].ticks += __rdtsc() - began;
@@ -450,10 +451,12 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
         for (int chip = 0; chip < 5; chip++) e.held[e.filling][chip][e.half].push_back({0, true});
     };
 
-    // Default: both CPUs on the caller's thread, a worker per chip. The Master's own thread spent
-    // most of its time spinning: about 0.7 of a core less without it, fast machine state or slow.
+    // Default: everything on the caller's thread. With the DSP programs translated a sample is
+    // about 9 us of work (CPUs 3.3, voice chips 0.8 each, effects chip 2.2) in a 20.8 us sample:
+    // 0.48 of a core and 2.2 times real time on one thread, nothing spinning. Workers buy margin:
+    // OB12_THREADS=4/0,1,2,3 is 3.7 times at 0.6 of a core, /0/1/2/3/4 is 6 times at 1.1.
     const char* layout = getenv("OB12_THREADS");
-    if (!layout) layout = "/0/1/2/3/4";
+    if (!layout) layout = "0,1,2,3,4";
     e.groups.assign(1, {});
     for (const char* c = layout; *c; c++) {
         if (*c == '/') e.groups.emplace_back();
