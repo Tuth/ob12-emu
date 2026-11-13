@@ -34,6 +34,7 @@
 //   OB12_HOST_SINGLE=1  host update words take effect one by one, not together when the select ends
 //   OB12_XREAD_CANCEL=1  a new XMEM read cancels the pending one (old model)
 //   OB12_XMEM_CR3=1  DASP4 XMEM size from CR3 (32K words) instead of the board's 128K
+//   OB12_TRACE_MAC=1  with OB12_CREADS: both MACs and CR1 after each word instead of the XMEM columns
 //   OB12_XREAD_CYCLES=n  words from a DASP4 XMEM read to its data in XRD (default 5; 0 = the old table, 9)
 //   OB12_EARLY_2D=1  secondary 2D before the primary: all LFOs stand still
 //   OB12_MACLO=1     primary 43 as low MAC word multiply, the old model
@@ -715,7 +716,8 @@ int main(int argc, char** argv) {
                         uint32_t w = h.dsp->pmem[pc], sop = (w >> 16) & 0x3f;
                         if ((w >> 24) < 0x80 && sop >= 0x18 && sop <= 0x1a) { double x = norm(h.dsp->ax[sop - 0x18][(w >> 15) & 1]); pcr_ax[pc] += x * x; }
                     }
-                    if (trace_w) printf(" -> D %06X A %06X %06X XR %05X xrd %06X\n", h.dsp->dmem[trace_d] & 0xffffff, h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->study_xread(), h.dsp->xrd & 0xffffff);
+                    if (trace_w && getenv("OB12_TRACE_MAC")) printf(" -> D %06X A %06X %06X M %013llX %013llX CR1 %06X\n", h.dsp->dmem[trace_d] & 0xffffff, h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, (unsigned long long)h.dsp->mac[0] & 0xfffffffffffffULL, (unsigned long long)h.dsp->mac[1] & 0xfffffffffffffULL, h.dsp->cr[1]);  // study: both MACs (52 bits) and CR1 instead of the XMEM columns
+                    else if (trace_w) printf(" -> D %06X A %06X %06X XR %05X xrd %06X\n", h.dsp->dmem[trace_d] & 0xffffff, h.dsp->acc[0] & 0xffffff, h.dsp->acc[1] & 0xffffff, h.dsp->study_xread(), h.dsp->xrd & 0xffffff);
                     if (creads_on && n == trace_chip && pc == 511) { creads_on = false; creads_done = true; }
                     if (n == cell_chip && cell_log && pc == 0 && now >= note_at + cell_from && now < note_at + cell_to && ++cell_count % cell_every == 0) {
                         if (!cell_pick.empty()) { for (int c : cell_pick) fwrite(c < 256 ? &h.dsp->dmem[c] : &h.dsp->cmem[c - 256], 4, 1, cell_log); }

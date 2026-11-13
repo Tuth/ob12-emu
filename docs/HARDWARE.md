@@ -2470,3 +2470,59 @@ with other work; not shown.
 
 What is left: one thread needs the whole sample's work under about 13 us; it is 35 to 50 us, nearly
 all of it the five DSP cores. Only a faster DSP core gets there.
+
+## A-017 in Split: the timbre stores BALANCE 0, filter 1 only (measured, firmware and preset true)
+
+Thor: in Split, Osc 2 is not heard on A-017 and the loudness differs. Measured (`seq_test`, one note,
+16.5 to 19.5 s): Osc 2's wave mix sliders at 00 give the same sound as Osc1 FM at 00 (rms 0.0181,
+centroid 536 Hz against 0.0398 and 6825 Hz), and Osc 1's sliders at 00 give silence (-90 dB). So on
+this timbre Osc 2 acts only as the FM modulator of Osc 1.
+
+Why, followed down:
+- DASP0 voice 1: filter 2 runs (states D50, D51 non zero with Osc 1 muted). The output mix is 12C
+  `42403140` MAC1 = C131 x D[da0], 12E `6C693940` MAC1 += C133 x D[da1], 130 takes it. The Slave
+  writes the pointers (C130: 09E000 Serial; 05104E Parallel and Split, so D4E filter 1 out and D51
+  filter 2 out) and the two gains. Routing is `A0 43 v` (0 Serial, 1 Parallel, 2 Split):
+
+| Routing | C129 (F1 in) | C12D (F2 in) | C131 | C133 |
+|---|---|---|---|---|
+| Serial | 9C mix | 4E F1 out | 0 | 456FBD |
+| Parallel | 9C mix | 9C mix | 456FBD | 0 |
+| Split | 48 Osc 1 | 9B Osc 2 | 456FBD | 0 |
+
+- The Slave computes the gains at FD2683-FD27CC: P = long[voice parameters + 54], L from the level
+  table FCF174; C133 from L x P, C131 from L - L x P (each with a shift byte, +58 and +59). P is set
+  at FDADF0-FDAE09 from `long[FCB616 + 4 x parameter 2E]`, a linear table 0 to 7FFFFFFF over 0 to
+  127. Sending `A0 pp 40` for every pp straight to the Slave (`OB12_SLAVE_FILE`,
+  `OB12_SLAVE_WATCH=efc9b2,efc9b6`): pp 44 sets P to 40810204. So `A0 44 v` is a filter balance.
+- The Master shows it: EDIT FILTERS, ROUTING page, in PARALLEL and SPLIT a line "BALANCE = 0"
+  (and in SPLIT "FILTER 1 IN=OSC 1, FILTER 2 IN=OSC 2"); Serial has no such line. The encoder moves
+  it up from 0, not below. B-021 FM Bell stores 0: filter 1 only.
+- Check: BALANCE raised on that page with Osc 1's sliders at 00: -50 dB instead of -90, Osc 2 now
+  comes through filter 2.
+
+So nothing is lost in our machine: the factory timbre uses Osc 2 as a silent modulator. The
+"Not checked: why Osc 2 through filter 2 is hardly heard" above is answered.
+
+## Osc 1 FM raises the level: the oscillator's own arithmetic (measured; not checked on a unit)
+
+Thor: Osc1 FM makes the sound louder. Measured, one note, MOUT rms: A-001 FM pot 00 -22.4 dB, 40
+-18.0, C0 -9.7, FF -8.9 with the peak at the rail; A-017 FM 00 -34.9, as stored -28.0.
+
+`A0 07 v` writes DASP0 C057 and C1C5 (FF: 07FFFF, 7FFFFF). 0C1 `6C691A9B` adds C1C5 x D9B (Osc 2)
+to the rate; 0C3 stores the sum in C1CC: 00B299 without FM, around F708C9 with it, so the
+instantaneous rate swings to about 13 times the note's and below zero. The phase (D7F, rms 0.578, a
+full scale ramp) is the same either way. The level changes in the waveform stage 0DA-0E8
+(`OB12_TRACE_MAC=1`, new: both MACs and CR1 per word): differences of the phase terms are multiplied
+by C0C8 and C0C9 (006520, 003264 here; the Slave writes them once at note on, for the note's
+pitch) and brought up by 512: twice loaded into a MAC upper word and read back through the x16
+output shift (0E3/0E4, 0E7/0E8), and once shifted left (0E5). That is a differentiated waveform:
+its size follows the rate, and the fixed coefficients make it right only for the note's own pitch.
+Osc 1's output D48: rms 0.040 without FM, 0.734 with FM FF, written at the rail (800000) under the
+saturating mode (CR1 bit 16 set at 0E7, 0E8).
+
+No rule of our core that is in doubt takes part here: plain multiplies, the x16 output shift read
+as elsewhere, saturation on. So the FM loudness is the firmware's own arithmetic as far as we can
+read it. Two things would change how much: if the clean level is really about 12 dB higher on a
+unit (see "Against a unit"), Osc 1 would sit near 0.16 and FM could add only about 13 dB less of
+that; and a unit's recording of one note with FM at 0 and at maximum would settle it.

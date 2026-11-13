@@ -92,7 +92,8 @@
       "XMEM read data in XRD after 5 words (firmware's own read and take pattern): chorus right channel junk -38 to -55 dB or better, reverb taps no longer shifted by one; reference 7a47ad74",
       "Panel: Osc2 Wave 1 and Wave 3 keys exchanged back (BUT5, BUT3), measured against the lamps",
       "A-017 Osc Common sliders: Split routing takes the filter inputs before the balance mix (DASP0 pointers C129 = 48, C12D = 9B from the Slave); firmware true, Serial makes the balance work",
-      "Threads: Master's own thread removed, layout a setting (OB12_THREADS); about 0.7 of a core less at real time in both machine states, output identical"
+      "Threads: Master's own thread removed, layout a setting (OB12_THREADS); about 0.7 of a core less at real time in both machine states, output identical",
+      "A-017 Split: timbre B-021 stores filter BALANCE 0 (A0 44, EDIT FILTERS ROUTING page), filter 1 only; Osc 2 is the silent FM modulator. Firmware and preset true"
     ],
     "blocked": []
   },
@@ -107,7 +108,8 @@
   },
   "audit_queue": [
     "CPU: both CPUs are 0.13 of a core; the five DSP cores are nearly all the work (6.6 us a sample each alone, 9-10 in the engine's slow state). Next: translate the DSP programs with the CR1 mode bits followed per word. Measure only in turn, several rounds: the machine has a fast and a slow state. Fast state margin of the new thread layout not confirmed",
-    "A-017 in Split routing: Osc 2 through filter 2 is hardly heard; look at filter 2's settings and its output level before calling it right",
+    "Signal path against the service manual, as Thor asks: what leaves DASP4 for the PCM1716 and for the S/PDIF output, sheet by sheet (rendered pages), and which of ATF1500, 74HC541, PCM1716 are modelled",
+    "Osc 1 FM raises the level (A-001: +13.5 dB at maximum, to the rail): the differentiated waveform stage 0DA-0E8 with note-on coefficients; needs a unit's recording, FM 0 against maximum, same note",
     "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
     "Reverb, delay and chorus changed with the XMEM read time: listen against a unit's recording",
     "Lamps Mono/Legato/Portamento/Unison dark: firmware LED image EC5B09 not updated on press; find the Master routine that sets it",
