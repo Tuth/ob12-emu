@@ -100,7 +100,8 @@
       "Signal path audit from the rendered sheets: FS 48.000 kHz from a 12.288 MHz oscillator; ATF1500 is the clock divider and host serializer, 74HC541 the clock fan out; S/PDIF and main DAC take DASP4 AX2 as it is, 24 bit I2S; PCM1716 setup confirmed against its data sheet",
       "DSP programs translated per half frame (tools/gen_fast.py, Machine on the stack): voices 1.2 ns a step, effects 3.4; whole machine bit identical; one thread by default, 0.43 of a core at 2.4 x real time",
       "CPUs: Master idle loop taken at once, direct memory windows, statistics off when lean; steady state CPUs 1.57 us a sample, whole machine 6.4; output, flash and LEDs identical",
-      "Translation: status flags apart from CR1's mode bits, constant options, ring size, CR3 and XMEM timing known: voices 0.7 ns a step, effects 1.0; machine 3.6 us a sample; all checks identical"
+      "Translation: status flags apart from CR1's mode bits, constant options, ring size, CR3 and XMEM timing known: voices 0.7 ns a step, effects 1.0; machine 3.6 us a sample; all checks identical",
+      "CPUs: no instruction hook when lean, interrupt sources asked once per scan: CPUs 1.02 us a sample, machine 3.05; all checks identical"
     ],
     "blocked": []
   },
@@ -114,7 +115,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "CPU: 3.6 us of work a sample after boot (0.19-0.25 of a core, one thread, 4.6 x). Left: Slave 1.16 (interpreter), chips 2.1 together, Master 0.35. Play build/next9 in a host",
+    "CPU: 3.05 us of work a sample after boot (0.12-0.19 of a core, one thread, 5.4 x). Left: Slave 0.87 (interpreter itself), voice chips 0.37 each, effects 0.55. Play build/next10 in a host",
     "Signal path audit done to the S/PDIF point (no difference found). Left: where AESEL comes from, the CS8402A straps against its data sheet (Thor has none yet), AX2 left/right latch time, aux output in the plug-in, analog low passes",
     "Osc 1 FM raises the level (A-001: +13.5 dB at maximum, to the rail): the differentiated waveform stage 0DA-0E8 with note-on coefficients; needs a unit's recording, FM 0 against maximum, same note",
     "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
@@ -163,5 +164,5 @@
   "reference_md5": "7a47ad74c1612850a09ab8639650b691",
   "host_bursts": "Host update words taken in per chip select (16 words), at the next sample start. A-018 pops gone; first note after program change still has one spike. OB12_HOST_SINGLE=1 old model.",
   "controllers": "VST3 IMidiMapping: CC 0-127, aftertouch, pitch bend forwarded to the Master.",
-  "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next9 (translated DSP programs, one thread); OB12_XREAD_CYCLES=0 in ob12_system is the old table."
+  "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next10 (translated DSP programs, one thread); OB12_XREAD_CYCLES=0 in ob12_system is the old table."
 }

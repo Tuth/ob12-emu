@@ -109,6 +109,7 @@ public:
         lean = true;
         ob12_idle_skip(true);
         if (byte_log || trace_file || watch_hi) return;
+        ob12_quiet_hook(true);  // also leaves out the call log at FFD3A0, FFD215, FFD12E, FFD1BD
         read_window[0] = {0xfc0000, 0x40000, 0x3ffff, flash.data()};
         read_window[1] = {0xe00000, 0x100000, 0xffff, ram.data()};
         write_window = {0xe00000, 0x100000, 0xffff, ram.data()};
@@ -235,14 +236,15 @@ private:
         }
         return false;
     }
-    int best_vector() const {
-        int best = 0, level = 7;
-        for (int vector = 0x0b; vector <= 0x2a; vector++) {
-            if (!source_pending(vector)) continue;
-            int icr_level = io[0xb0 + (vector - 11) / 2] & 7;
-            if (icr_level < level) { level = icr_level; best = vector; }
-        }
-        return best;
+    int best_vector() const {  // the same answer as going through source_pending() for 0B to 2A
+        PendingScan p;
+        for (auto& t : timer) p.add(t.vector, t.pending());
+        for (auto& u : uart) { p.add(u.tx_vector, u.tx_pending()); p.add(u.rx_vector, u.rx_pending()); }
+        p.add(0x1b, (io[0x30] & 0x18) == 0x18);
+        p.add(0x22, (io[0xa9] & 0x18) == 0x18);
+        p.add(0x2a, io[0x9f] & 1);
+        for (int vector = 0x0b; vector <= 0x19; vector += 2) p.add(vector, io[0x28] & io[0x29] & (1 << ((vector - 0x0b) / 2)));
+        return p.best(io);
     }
     void update_irq() {
         int vector = best_vector();

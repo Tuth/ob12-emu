@@ -50,6 +50,9 @@ public:
 	u8 ob12_dtb() const { return m_dtb; }
 	// OB-12: a branch to itself (the firmware's idle loop) is taken for the rest of the run at once.
 	void ob12_idle_skip(bool on) { m_ob12_idle_skip = on; }
+	// OB-12: no instruction hook while the PC is in memory (bank E0 and above); below, the hook
+	// still runs and stops the machine. For the engine, which reads nothing the hook keeps.
+	void ob12_quiet_hook(bool on) { m_ob12_quiet_hook = on; }
 	long ob12_idle_turns = 0;  // loop turns taken that way
 	void set_irq_level(int level);
 
@@ -740,7 +743,7 @@ private:
 
 	// OB-12 additions, see ob12_ea.inc
 	int m_ob12_ncc = 0, m_ob12_cmr = 0;
-	bool m_ob12_idle_skip = false;
+	bool m_ob12_idle_skip = false, m_ob12_quiet_hook = false;
 	u16 m_ob12_saved_ccr = 0, m_ob12_saved_rp = 0;
 	f2mc16_ea ea_decode(u8 mode, int size);
 	u8 ea_r8(const f2mc16_ea &ea);

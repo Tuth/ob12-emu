@@ -2711,3 +2711,22 @@ Measured, profile guided, `dsp_bench`: voices 0.70 and 0.71 ns a step (were 1.26
 All the checks again: reference 7a47ad74 on engine and harness, the eight scenarios, and the flash
 format with a store, equal to the old engine. VST3: build/next9, not yet played in a host.
 The Slave is now the largest single part.
+
+## The CPUs again: no hook when lean, interrupt sources asked once (measured)
+
+- `ob12_quiet_hook`: with the direct windows open (`go_lean`, no study on), the instruction hook
+  is not called while the PC is in bank E0 or above; below it still runs and stops the machine.
+  `pc`, `steps` and the Slave's call log at FFD3A0, FFD215, FFD12E, FFD1BD are then not kept; only
+  the studies read them. CPUs 1.54 to 1.40 us a sample.
+- `best_vector()` went through 32 vectors and asked every source for each, at every tick and
+  register write. `PendingScan` (mb90611.h) asks each source once, in the order
+  `source_pending()` asks them, so a vector two sources share is still answered by the first, then
+  takes the lowest level, on a tie the lowest vector. `source_pending()` stays for the interrupt
+  acknowledge. CPUs 1.40 to 1.02 (Master 0.31 to 0.13, Slave 1.06 to 0.87).
+
+`OB12_TIME_LOG=14`, us a sample: CPUs 1.02, chips 0.37, 0.37, 0.38, 0.36, 0.55: 3.05 in all.
+`engine_test rom 16`: 5.44 x on one thread. `pace_test`: 0.12 to 0.19 cores, 0 ring empties.
+Checks: reference 7a47ad74 on engine and harness, the eight scenarios and the flash run with a
+store all equal to the old engine. VST3: build/next10, not yet played in a host.
+
+Where the 3.05 us go now: Slave 0.87, voice chips 1.48 together, effects chip 0.55, Master 0.13.

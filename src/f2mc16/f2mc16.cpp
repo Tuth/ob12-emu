@@ -266,7 +266,8 @@ void f2mc16_device::execute_run()
 		if (!m_prefix_valid)
 		{
 			m_pcbase = (m_pcb << 16) | m_pc;
-			debugger_instruction_hook((m_pcb << 16) | m_pc);
+			if (!m_ob12_quiet_hook || m_pcb < 0xe0)
+				debugger_instruction_hook((m_pcb << 16) | m_pc);
 		}
 		u8 opcode = read_8((m_pcb << 16) | m_pc);
 

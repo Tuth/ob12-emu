@@ -31,6 +31,33 @@ struct ReloadTimer {
     bool pending() const { return (tmcsr & 0x0c) == 0x0c; }
 };
 
+// The interrupt sources asked one by one, in the order source_pending() asks them, instead of
+// asking every source for each of the 32 vectors. A vector two sources share is answered by the
+// first, as there; best() then goes up the pending vectors: lowest level wins, on a tie the
+// lowest vector.
+struct PendingScan {
+    u64 claimed = 0, pending = 0;
+    void add(int vector, bool is_pending) {
+        if (vector < 0 || vector > 63) return;
+        u64 bit = (u64)1 << vector;
+        if (claimed & bit) return;
+        claimed |= bit;
+        if (is_pending) pending |= bit;
+    }
+    int best(const u8* io) const {
+        u64 left = pending & ((((u64)1 << 0x2b) - 1) & ~(((u64)1 << 0x0b) - 1));  // vectors 0B to 2A
+        int best = 0, level = 7;
+        while (left) {
+            int vector = 0;
+            while (!(left >> vector & 1)) vector++;
+            left &= left - 1;
+            int icr_level = io[0xb0 + (vector - 11) / 2] & 7;
+            if (icr_level < level) { level = icr_level; best = vector; }
+        }
+        return best;
+    }
+};
+
 struct Uart {
     int base = 0, tx_vector = 0, rx_vector = 0;
     const char* name = "";
