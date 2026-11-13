@@ -34,7 +34,8 @@
     "run_slave_pass": "no STOP line; UART2 Master shows 11 and the version text",
     "core_compare": "build/core_compare.exe rom/dsp 2000 (needs a local public emulator copy)",
     "run_system": "OB12_DIRECT=3 OB12_POT_SWEEP=14 build/ob12_system.exe rom 21 16 build/final.wav, then python tools/analyse_wav.py build/final.wav 19 20.8",
-    "tone": "OB12_MIDI_EVENTS=13:pc:10 OB12_AUX_TONE=400000 OB12_BUS_TONE=1 build/ob12_system.exe rom 19 15 build/tone.wav, then python tools/tone_junk.py build/tone.wav: junk below -50 dB on both sides"
+    "tone": "OB12_MIDI_EVENTS=13:pc:10 OB12_AUX_TONE=400000 OB12_BUS_TONE=1 build/ob12_system.exe rom 19 15 build/tone.wav, then python tools/tone_junk.py build/tone.wav: junk below -50 dB on both sides",
+    "dsp_bench": "build tools/dsp_bench.cpp with build/tms57070.obj; dsp_bench rom/dsp 0: about 13 ns a step, state DD531EB0 (4: 39D4251A) while the core's behaviour is unchanged"
   },
   "status": {
     "phase": "XMEM read time 5 words: right chorus crackle gone, reverb taps in place; Osc2 wave keys in order",
@@ -104,7 +105,7 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "CPU load (Thor: the emulator eats the CPU): measure cores at real time in the plug-in now, then the spinning workers and step()",
+    "CPU: 3.3 cores at real time = 1.57 DSP + 0.65 CPUs + 1.1 waiting. Next: translate the DSP programs with the CR1 mode bits followed per word; fewer, fuller threads. OB12_ONE_CPU=1 gives 2.65 cores now at 1.54 x margin (Thor to decide the default). Constant word core tried, no gain, dropped",
     "A-017 in Split routing: Osc 2 through filter 2 is hardly heard; look at filter 2's settings and its output level before calling it right",
     "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
     "Reverb, delay and chorus changed with the XMEM read time: listen against a unit's recording",
@@ -120,7 +121,6 @@
     "KBD Track direction: FF darkens note 48, check against the panel",
     "Bus sum saturation: resonance sweep still wraps without it, check against the real mechanism",
     "AOUT left constant 113",
-    "CPU: faster step() is what lowers the floor",
     "Plugin next: try in a DAW, check control positions by hand, LEDs, Panel C, real time safe MIDI, state, boot time",
     "PR Prehistoricman/TMS57070#3 is open: answer review, licence question pending with the author",
     "Later, at Thor's request: model the analog output path, sheets 11-15; output is taken digitally from DASP4 AX2 today",

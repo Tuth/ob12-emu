@@ -2394,3 +2394,36 @@ bit 6) on A-017 moves the lamp to Serial (latch 9 4C to 64), and then Balance 1 
 gives different sound (rms 0.025 against 0.008, one note). Osc1 FM (A0 07) and Sync (A0 19) do not
 change the pointers. Not checked: what a unit does with the balance in Split, and why Osc 2 through
 filter 2 is hardly heard on this timbre (filter 2's own settings were not looked at).
+
+## CPU load: where it goes now (measured), and a constant word core that did not pay (dropped)
+
+Thor: the emulator eats the CPU. `pace_test` (6 notes, 48 ms ring, Ryzen 9 5900X), current build:
+3.21 to 3.39 cores, 0 ring empties; with one CPU thread (`OB12_ONE_CPU=1`) 2.63 to 2.70, 0 ring
+empties, three runs each, output identical. Offline 2.54 x and 1.54 x real time.
+
+The parts:
+- DSP cores alone (`tools/dsp_bench`, new: a carved program through step(), noise in): 13.1 ns a
+  step on the voice program, 12.4 on the effects program, profile guided. Five chips at 24.576M
+  steps a second: 1.57 cores.
+- The two CPUs: from the one thread run, 10.41 s for 16 s of sound with the CPUs as the slow path,
+  13.5 us a sample for both: 0.65 of a core (by arithmetic).
+- So about 2.2 cores are work and about 1.1 is waiting: threads spinning for each other inside a
+  burst. One CPU thread wins 0.65 of that back and costs the margin: 1.54 x leaves little when the
+  machine is in its slow state (see "The CPU rise was the machine").
+
+Tried and dropped, the core with each program word as a compile time constant (a generator wrote
+one case per PMEM word calling the step with the constant, from rom/dsp into build/): output bit
+identical (MD5 7a47ad74, `dsp_bench` state equal), but 1.05 x on the core alone, 0.9 x once laid
+out as straight line code, and the whole engine slower than the profile guided step() (3.69
+against 3.29 cores). Why: decoding is not the cost. A sampling profile of step() is flat, 1813
+distinct addresses and the hottest 2.2%; a word costs about 50 cycles of work that depends on
+state, not on the word: the DMEM ring index, the CMEM offset and lock flags, the MAC output shift,
+rounding and saturation modes read from CR1 each time, the flag updates. The generated function was
+1.3 MB and the compiler kept its pointers on the stack. Two small simplifications (one write for
+the ACC flags, the address pipeline skipped when empty) gave under 20% on the core without profile
+guidance and were not kept.
+
+What would lower the floor: a translator that follows the mode bits through each program (the
+secondaries 28-2D that set them are constants in the word), so a word's shift, rounding and
+saturation are known when it is translated; and fewer, fuller threads (both CPUs on one, the chips
+two to a thread: about 2.4 cores by arithmetic, margin 1.54 x). Not done.
