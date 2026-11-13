@@ -76,10 +76,10 @@ public:
     std::function<void()> on_dsp_select;       // NDCS changed
     void feed(const std::vector<u8>& bytes) { uart[2].rx_queue.insert(uart[2].rx_queue.end(), bytes.begin(), bytes.end()); }
 
-    u8 read_byte(u32 address) override {
+    u8 slow_read(u32 address) override {
         address &= 0xffffff;
         if (byte_log && ((pc >= 0xfc29b0 && pc < 0xfc29f8) || pc == 0xfd1791)) fprintf(byte_log, "read %06X at %06X\n", address, pc);  // study: where the DSP sender reads
-        if (address < 0x100) { Stat& s = touch(iostat, address); s.reads++; return io_read(address); }
+        if (address < 0x100) { if (!lean) { Stat& s = touch(iostat, address); s.reads++; } return io_read(address); }
         if (address < 0x500) return internal[address];
         if (address >= 0xfc0000) return flash[address - 0xfc0000];
         if (address >= 0xe00000 && address < 0xf00000) { if (trace_file) fprintf(trace_file, "R %06X %02X\n", address, ram[address & 0xffff]); return ram[address & 0xffff]; }
@@ -87,9 +87,9 @@ public:
         s.reads++;
         return 0xff;
     }
-    void write_byte(u32 address, u8 data) override {
+    void slow_write(u32 address, u8 data) override {
         address &= 0xffffff;
-        if (address < 0x100) { Stat& s = touch(iostat, address); s.writes++; s.last = data; io_write(address, data); return; }
+        if (address < 0x100) { if (!lean) { Stat& s = touch(iostat, address); s.writes++; s.last = data; } io_write(address, data); return; }
         if (address < 0x500) { if (address >= watch_lo && address < watch_hi && cycles_total >= watch_from) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data); internal[address] = data; return; }
         if (address >= 0xfc0000) { Stat& s = touch(flashw, address & 0xffff00); s.writes++; s.last = data; return; }
         if (address >= watch_lo && address < watch_hi && cycles_total >= watch_from) printf("slave watch %.4f idx %02X pc %06X W %06X %02X\n", (double)cycles_total / 16e6, ram[0x7b9e], pc, address, data);
@@ -104,6 +104,15 @@ public:
     s64 watch_from = 0;  // study: watch only from this cycle on (OB12_SLAVE_WATCH_FROM, seconds)  // study: print writes in this range
     FILE* trace_file = nullptr;  // study: PCs and RAM accesses
     bool lean = false;  // skip the per instruction statistics
+    // Lean running for the engine: see go_lean in ob12_master.cpp.
+    void go_lean() {
+        lean = true;
+        ob12_idle_skip(true);
+        if (byte_log || trace_file || watch_hi) return;
+        read_window[0] = {0xfc0000, 0x40000, 0x3ffff, flash.data()};
+        read_window[1] = {0xe00000, 0x100000, 0xffff, ram.data()};
+        write_window = {0xe00000, 0x100000, 0xffff, ram.data()};
+    }
     void tick(int cycles) {
         cycles_total += cycles;
         for (auto& t : timer) t.advance(cycles);

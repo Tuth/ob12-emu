@@ -41,8 +41,29 @@ public:
 class address_space {
 public:
     virtual ~address_space() = default;
-    virtual u8 read_byte(u32 address) = 0;
-    virtual void write_byte(u32 address, u8 data) = 0;
+    // What the machine does for an address: every access outside the direct windows.
+    virtual u8 slow_read(u32 address) = 0;
+    virtual void slow_write(u32 address, u8 data) = 0;
+
+    // Host addition: plain memory can be reached without the virtual call. A window covers
+    // addresses base .. base + size - 1 (after the 24 bit mask) and maps them onto data[offset &
+    // mask]; size 0 is no window. Two for reading (code and RAM), one for writing (RAM). A machine
+    // opens them only when nothing watches those accesses: see go_lean in ob12_master.cpp.
+    struct Window { u32 base = 0, size = 0, mask = 0; u8* data = nullptr; };
+    Window read_window[2], write_window;
+    u8 read_byte(u32 address) {
+        u32 a = address & 0xffffff;
+        u32 offset = a - read_window[0].base;
+        if (offset < read_window[0].size) return read_window[0].data[offset & read_window[0].mask];
+        offset = a - read_window[1].base;
+        if (offset < read_window[1].size) return read_window[1].data[offset & read_window[1].mask];
+        return slow_read(address);
+    }
+    void write_byte(u32 address, u8 data) {
+        u32 offset = (address & 0xffffff) - write_window.base;
+        if (offset < write_window.size) { write_window.data[offset & write_window.mask] = data; return; }
+        slow_write(address, data);
+    }
     u16 read_word(u32 address) { return read_byte(address) | read_byte(address + 1) << 8; }
     u32 read_dword(u32 address) { return read_word(address) | (u32)read_word(address + 2) << 16; }
     void write_word(u32 address, u16 data) { write_byte(address, data & 0xff); write_byte(address + 1, data >> 8); }

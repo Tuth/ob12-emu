@@ -16,12 +16,16 @@ struct ReloadTimer {
         if (!running || !(tmcsr & 2) || !divider()) return;
         prescale += cycles;
         int div = divider();
-        while (prescale >= div) {
-            prescale -= div;
-            if (count == 0) {
-                tmcsr |= 4;  // UF
-                if (tmcsr & 0x10) count = reload; else { running = false; return; }
-            } else count--;
+        // One count per div cycles: down to 0, and the count after 0 sets UF and reloads or stops.
+        // Taken in runs instead of one by one (up to 83 counts a call at the usual 167 cycles).
+        s64 steps = prescale / div;
+        while (steps > 0) {
+            if (count >= steps) { count = (u16)(count - steps); prescale -= steps * div; break; }
+            s64 used = (s64)count + 1;  // down to 0, then the underflow
+            prescale -= used * div;
+            steps -= used;
+            tmcsr |= 4;  // UF
+            if (tmcsr & 0x10) count = reload; else { count = 0; running = false; return; }
         }
     }
     bool pending() const { return (tmcsr & 0x0c) == 0x0c; }

@@ -48,6 +48,9 @@ public:
 	u16 ob12_usp() const { return m_usp; }
 	u8 ob12_usb() const { return m_usb; }
 	u8 ob12_dtb() const { return m_dtb; }
+	// OB-12: a branch to itself (the firmware's idle loop) is taken for the rest of the run at once.
+	void ob12_idle_skip(bool on) { m_ob12_idle_skip = on; }
+	long ob12_idle_turns = 0;  // loop turns taken that way
 	void set_irq_level(int level);
 
 protected:
@@ -737,6 +740,7 @@ private:
 
 	// OB-12 additions, see ob12_ea.inc
 	int m_ob12_ncc = 0, m_ob12_cmr = 0;
+	bool m_ob12_idle_skip = false;
 	u16 m_ob12_saved_ccr = 0, m_ob12_saved_rp = 0;
 	f2mc16_ea ea_decode(u8 mode, int size);
 	u8 ea_r8(const f2mc16_ea &ea);

@@ -2645,3 +2645,39 @@ keys, pitch bend, mod wheel moved): all eight WAVs equal.
 
 The two CPUs are now the largest part, 3.25 us of 8.4: the next thing to make faster.
 VST3 with it: build/next7. Not yet played in a host.
+
+## The two CPUs made cheaper: idle loop, direct memory, statistics off (measured)
+
+Where the CPUs were (CPU only bench, from 14 s, three notes; `HOT=1` lists the addresses run):
+- Master: 96.1% of its 3.95M instructions a second at one address, F00709 `60 FE`, BRA to itself:
+  the RTOS idles there until an interrupt.
+- Slave: no such loop; half its 2.81M instructions in one routine (FC2813-FC282F, FC2A1D-FC2A20,
+  17 instructions) and 9% in FCDB8E-FCDB98: real scanning, not idle.
+
+Changes, each keeping the output:
+- `f2mc16.cpp`, BRA to itself: an interrupt request changes only between runs, so the remaining
+  turns of the loop in a run are taken at once, 4 cycles each, the cycle count ending where it
+  would have (`ob12_idle_skip`; not while a prefix, a delayed flag restore or a pending request
+  could make a turn differ). `ob12_idle_turns` counts them.
+- `shim/emu.h`: the machine's handlers are `slow_read` / `slow_write`; `read_byte` / `write_byte`
+  first try two read windows and one write window of plain memory. `go_lean()` on Master and Slave
+  (the engine calls it) opens them for flash (read) and RAM (read and write), unless a study watches
+  those accesses. The harness keeps `lean = true` only and so runs the old way.
+- I/O register statistics (a map lookup per access) are skipped when lean.
+- `mb90611.h`: the reload timer counts in runs, not one by one. No time gained (the timers were not
+  the cost; the CPU bench's "tick" figure was its own clock reads), kept as it is simpler work.
+
+Measured, all with the reference 7a47ad74 unchanged on engine and harness, the eight `seq_test`
+scenarios equal to the old engine's again, and a boot on an empty memory with a store equal too
+(196614 flash writes, the stored file, the audio and the LED latches the same in both):
+- CPU only bench, Master run 0.048 to 0.006 s per second of sound, Slave 0.062 to 0.043.
+- `OB12_TIME_LOG=14` (now a time: counts from there, so the boot is left out), us a sample, three
+  notes: CPUs 1.57 (Master 0.36, Slave 1.18), chips 0.63, 0.62, 0.59, 0.57, 2.43: 6.4 in all.
+  The earlier "CPUs 3.25" was an average over the boot, where the Master is busy.
+- `engine_test rom 16`: 2.64 x from 2.38 x. `pace_test`: 0.36 to 0.42 cores (0.42 to 0.44 before),
+  0 ring empties; the machine's timer was coarse in these runs (about 790 sleeps in 12 s, 5000
+  before), so the pace figures are rough.
+
+What is left of the 6.4 us: the effects chip 2.43 (4.7 ns a step against 1.2 on a voice chip: its
+128K words of XMEM do not fit the cache), the Slave 1.18, the four voice chips 2.4 together.
+VST3: build/next8. Not yet played in a host.

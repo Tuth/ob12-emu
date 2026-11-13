@@ -170,11 +170,10 @@ public:
         }
         if (printable && text_runs.size() < 16) text_runs.push_back({address + 1, address, text_reads, std::string(1, (char)data)});
     }
-    u8 read_byte(u32 address) override {
+    u8 slow_read(u32 address) override {
         address &= 0xffffff;
         if (address < 0x100) {
-            Stat& s = touch(iostat, address);
-            s.reads++;
+            if (!lean) { Stat& s = touch(iostat, address); s.reads++; }
             return io_read(address);
         }
         if (address < 0x500) return internal[address];
@@ -194,12 +193,10 @@ public:
         s.reads++;
         return 0xff;
     }
-    void write_byte(u32 address, u8 data) override {
+    void slow_write(u32 address, u8 data) override {
         address &= 0xffffff;
         if (address < 0x100) {
-            Stat& s = touch(iostat, address);
-            s.writes++;
-            s.last = data;
+            if (!lean) { Stat& s = touch(iostat, address); s.writes++; s.last = data; }
             io_write(address, data);
             return;
         }
@@ -228,6 +225,16 @@ public:
 
     long font_reads[64] = {};  // which fonts the firmware asks for
     bool lean = false;  // skip the per instruction statistics
+    // Lean running for the engine: no statistics, code and RAM read and RAM written through the
+    // direct windows (emu.h), and the idle loop taken in one go. Not while a study watches memory.
+    void go_lean() {
+        lean = true;
+        ob12_idle_skip(true);
+        if (text_log || watch_from || mwatch_hi) return;
+        read_window[0] = {0xf00000, 0x100000, 0xfffff, flash.data()};
+        read_window[1] = {0xe00000, 0x100000, 0x3ffff, ram.data()};
+        write_window = {0xe00000, 0x100000, 0x3ffff, ram.data()};
+    }
     void tick(int cycles) {
         cycles_total += cycles;
         for (auto& t : timer) t.advance(cycles);

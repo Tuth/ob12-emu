@@ -1314,6 +1314,18 @@ void f2mc16_device::execute_run()
 
 		// BRA
 		case 0x60:
+			// OB-12: BRA to itself. Until an interrupt nothing changes, and an interrupt request only
+			// changes between runs, so every later turn of the loop in this run is this one again:
+			// 4 cycles each while the count is above 0. No turn is taken at once while a prefix, a
+			// delayed flag restore or a pending request could make one differ.
+			if (m_ob12_idle_skip && !m_prefix_valid && !m_ob12_ncc && !m_ob12_cmr && !(m_irq_level < m_ps && (m_ps & F_I))
+				&& read_8((m_pcb << 16) | (u16)(m_pc + 1)) == 0xfe)
+			{
+				s32 more = (m_icount - 1) / 4;  // turns after this one that would still start above 0
+				m_icount -= 4 + more * 4;
+				ob12_idle_turns += more;
+				break;
+			}
 			take_branch();
 			break;
 

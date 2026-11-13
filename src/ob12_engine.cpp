@@ -334,8 +334,12 @@ struct Engine::Impl {
         }
         slice = k % 3 == 2 ? 166 : 167;  // 16 MHz: 500 cycles per three half frames
         if (!master_thread) {
+            uint64_t t0 = __rdtsc();
             m->run(slice); m->tick(m->executed());
+            uint64_t t1 = __rdtsc();
             s->run(slice); s->tick(s->executed());
+            spent_master.ticks += t1 - t0;
+            spent_slave.ticks += __rdtsc() - t1;
         } else {
             cpu_gate.open(1);
             s->run(slice); s->tick(s->executed());
@@ -383,10 +387,12 @@ struct Engine::Impl {
 
     long dsp_batch = 0;
     // Study (OB12_TIME_LOG): time stamp counter ticks spent in each part, summed over the run.
-    struct alignas(64) Spent { uint64_t ticks = 0; } spent_chip[5], spent_cpu, spent_wait;
+    struct alignas(64) Spent { uint64_t ticks = 0; } spent_chip[5], spent_cpu, spent_wait, spent_master, spent_slave;
+    long time_from = getenv("OB12_TIME_LOG") ? (long)(atof(getenv("OB12_TIME_LOG")) * 48000) : -1;  // OB12_TIME_LOG=seconds: count from there (1 or less: from the start)
 
     void next_batch() {
         filling = batch & 1;
+        if (batch == time_from) { for (auto& c : spent_chip) c.ticks = 0; spent_cpu.ticks = spent_wait.ticks = spent_master.ticks = spent_slave.ticks = 0; }
         uint64_t began = __rdtsc();
         half = 0;
         cpu_slice();
@@ -436,7 +442,8 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     e.s->attach(e.s);
     e.m->reset();
     e.s->reset();
-    e.m->lean = e.s->lean = true;
+    e.m->go_lean();
+    e.s->go_lean();
     // DASP4 has 3 x 44C256 DRAM, 256K x 12 bits: 128K words of 24 bits in two accesses.
     tms::Options options4 = options;
     options4.xmem_words = 0x20000;
@@ -585,10 +592,11 @@ Engine::~Engine() {
         // us per sample of sound, taking the counter at its nominal rate (the first 2 s calibrate it)
         static double rate = 0;
         if (!rate) { uint64_t a = __rdtsc(); Sleep(200); rate = (__rdtsc() - a) / 0.2; }
-        double samples = impl->batch ? (double)impl->batch : 1;
+        double samples = impl->batch > impl->time_from && impl->time_from > 48000 ? (double)(impl->batch - impl->time_from) : impl->batch ? (double)impl->batch : 1;
         auto us = [&](uint64_t ticks) { return ticks / rate * 1e6 / samples; };
         printf("us a sample: CPUs (both slices, with the Master wait if it has a thread) %.2f, wait for chips %.2f, chips", us(impl->spent_cpu.ticks), us(impl->spent_wait.ticks));
         for (auto& c : impl->spent_chip) printf(" %.2f", us(c.ticks));
+        printf("; of the CPUs: Master %.2f, Slave %.2f", us(impl->spent_master.ticks), us(impl->spent_slave.ticks));
         puts("");
     }
     impl->stop = true;
