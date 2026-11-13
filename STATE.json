@@ -89,7 +89,8 @@
       "All 89 panel LEDs mapped (46 lamps, 43 indicators) from the service manual sheets and layouts",
       "Display: font 1 (program name) in Handel Gothic, proportional, 16 rows; data dial and knob light line animated",
       "XMEM read data in XRD after 5 words (firmware's own read and take pattern): chorus right channel junk -38 to -55 dB or better, reverb taps no longer shifted by one; reference 7a47ad74",
-      "Panel: Osc2 Wave 1 and Wave 3 keys exchanged back (BUT5, BUT3), measured against the lamps"
+      "Panel: Osc2 Wave 1 and Wave 3 keys exchanged back (BUT5, BUT3), measured against the lamps",
+      "A-017 Osc Common sliders: Split routing takes the filter inputs before the balance mix (DASP0 pointers C129 = 48, C12D = 9B from the Slave); firmware true, Serial makes the balance work"
     ],
     "blocked": []
   },
@@ -103,7 +104,8 @@
     "bit_exact": 0.35
   },
   "audit_queue": [
-    "A-017 FM Bell: Osc Common Balance, Ring Mod, Noise and Osc1 FM sliders change nothing in the sound though C128/C126 are written; follow DASP0 118 (ACC0 = 0) back",
+    "CPU load (Thor: the emulator eats the CPU): measure cores at real time in the plug-in now, then the spinning workers and step()",
+    "A-017 in Split routing: Osc 2 through filter 2 is hardly heard; look at filter 2's settings and its output level before calling it right",
     "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
     "Reverb, delay and chorus changed with the XMEM read time: listen against a unit's recording",
     "Lamps Mono/Legato/Portamento/Unison dark: firmware LED image EC5B09 not updated on press; find the Master routine that sets it",

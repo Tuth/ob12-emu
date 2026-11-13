@@ -2374,3 +2374,23 @@ FM Bell's voice path really bypasses the balance or our core loses it is not kno
 
 Panel: the Osc2 Wave 1 and Wave 3 keys were exchanged (BUT5 lights Wave 1's lamp, latch 7 bit 6;
 BUT3 Wave 3's, bit 4; measured with `seq_test` t:key and t:dump). Osc1's keys were right.
+
+### A-017's dead Osc Common sliders: the Split routing, firmware true (measured)
+
+Closes the open point above. A-017's timbre (B-021 FM Bell) has the filter Routing on Split (lamp
+latch 9 bit 3 lit; A-001 has Serial, bit 5). DASP0 trace of the first voice (`OB12_CREADS`,
+`OB12_TRACE4_ALL=1`, `OB12_TRACE_CHIP=0`): the balance mix is still computed (115-11D, C126 and C128
+into D9C), but the filter inputs are taken through pointers the Slave writes at the first note of a
+program: C129 (loaded at 119, used at 11E) and C12D (11E).
+
+| | C129 | C12D | Filter 1 input | 
+|---|---|---|---|
+| A-001, Serial | 00009C | 00009D | D9C, the balance mix |
+| A-017, Split | 000048 | 00009B | D48, Osc 1 before the mix; D9B (Osc 2) for filter 2 |
+
+So in Split each oscillator goes to its own filter and the Osc1/Osc2 balance, which sits in the
+mix, is out of the path: by the firmware's own pointers, not by our core. Check: Routing key (bar 6
+bit 6) on A-017 moves the lamp to Serial (latch 9 4C to 64), and then Balance 1 at 00 against FF
+gives different sound (rms 0.025 against 0.008, one note). Osc1 FM (A0 07) and Sync (A0 19) do not
+change the pointers. Not checked: what a unit does with the balance in Split, and why Osc 2 through
+filter 2 is hardly heard on this timbre (filter 2's own settings were not looked at).
