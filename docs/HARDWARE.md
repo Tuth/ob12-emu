@@ -2526,3 +2526,61 @@ as elsewhere, saturation on. So the FM loudness is the firmware's own arithmetic
 read it. Two things would change how much: if the clean level is really about 12 dB higher on a
 unit (see "Against a unit"), Osc 1 would sit near 0.16 and FM could add only about 13 dB less of
 that; and a unit's recording of one note with FM at 0 and at maximum would settle it.
+
+## Signal path audit: DASP4 to the DACs and the S/PDIF output (read from rendered sheets; measured where said)
+
+Thor asks for the signal to be true to the hardware at least up to the digital output. Sheets 05,
+08, 09, 11 of the service manual and the PCM1716 data sheet, read as rendered pages
+(build/sm/*.png, made with PyMuPDF at 4 to 5 times; not in git).
+
+Clocks, sheet 08/15 "DASPs CONTROL":
+- XTAL1 is a 12.288 MHz oscillator; its output is FSx256 (a, d, c through R34, R31, R33). So FS is
+  48.000 kHz exactly, and the DSPs' CLKIN is 12.288 MHz (with the x2 PLL, 512 cycles a sample, as
+  the engine runs them).
+- IC15 ATF1500 takes FSx256c on its clock pin and gives FSx128, FSx64, FSx2, FS: the divider. It
+  also sits on the Slave's bus (D[7:0], A[0], CSDSP, RD, WRL) and drives the DSPs' serial host
+  port (HR, HRS, HX, HXS, HCK[2:0]): the byte to serial converter. Nothing of it touches audio data.
+- IC16 74HC541 is the clock fan out only: FSx128 to d1, s, d2; FSx64 to s, d, a; FSx2 to d1, d2; FS
+  to s, d, a (d = DSPs, a = DACs, s = S/PDIF), each through a series resistor.
+  So neither part needs a model beyond what the engine does: an exact 48 kHz and host bytes.
+
+DASP4, sheet 09/15:
+- AR1 and AR2 take D3SO2, D3SO3 (DASP3 AX2, AX3), both clocked by FSx2d1 / FSx128d1: two frames
+  per sample, the two slots of the engine's bus.
+- AX1 is the LFO line back to the voices, on the same 2 x FS clocks.
+- AX2 and AX3 are clocked by FSxd / FSx64d: one frame per sample, 64 bit clocks. AX2 goes through
+  47 ohm to MOUTa and MOUTs, AX3 to AOUTa and AOUTs.
+- The effects program writes AX2 once a sample (072 left, 074 right), AX3 once (108, 109), AX1 in
+  both halves (03C, 03E, 13C).
+
+DACs, sheet 11/15: two PCM1716. Main: Din = MOUTa, LRCin = FSxa, BCKin = FSx64a, XTI = FSx256a.
+Aux: Din = AOUTa, same clocks. Each has its own latch enable (NDACLE[0], [1]) on the shared ACK /
+ADI control lines; DACRST, DACMUTE, and JOFF (the J108 FETs to ground on every output) mute.
+The setup words against the data sheet (page 9, 10: B10, B9 are the register address):
+- 0408: register 2, IW1 0, IW0 1, OPE 0, DEM 0, MUT 0: operating, no de-emphasis, no mute.
+- 0643: register 3, I2S 1, LRP 1, ATC 0, SRO 0, REV 0, CKO 0, SF 01, IZD 0. IW 01 with I2S 1 is
+  "24-Bit I2S" in the data sheet's table: sharp roll off, output not inverted, no zero detect mute.
+- 01FF, 03FF: registers 0 and 1, LDL / LDR set, FF = 0 dB.
+  This confirms the earlier decode; the DAC takes the whole 24 bit word at 0 dB.
+
+S/PDIF, sheet 05/15 "REAR PANEL": IC10 CS8402A, SDATA from three NAND gates of IC9 (74HC00):
+MOUTs when AESEL is high, AOUTs when it is low. SCK = FSx64s, FSYNC = FSxs, MCK = FSx128s, RST =
+DORST; M2 high, M1 and M0 low; PRO tied high (consumer); TXP through 374 ohm and 90.9 ohm to the
+PE65612 transformer and the RCA jack CN8. No CS8402A data sheet here: M = 100 as the I2S
+compatible format is from memory, not checked, and the channel status straps were not read.
+Where AESEL comes from was not followed.
+
+So the digital output carries the same serial word as the main DAC: DASP4's AX2 (or AX3), 24 bits,
+48 kHz, nothing between but gates and a transmitter. The engine's output is that word: AX2 after
+the sample's second half frame, 24 bits, taken 1:1 by the plug-in (float of the word / 2^23). At
+this point there is no model in the path that could differ from the board; what differs from a unit
+is inside the five DSPs and what the two CPUs send them.
+
+Not modelled, by choice or not yet:
+- The aux pair (AX3, its DAC, AESEL). Checked on A-012, A-023, A-026 (the programs once found
+  silent on one note): all sound on MOUT, AOUT stays at its constant 113 left, 0 right.
+- Mute lines at power on (DMUTE, DACMUTE, JOFF) and the S/PDIF channel status.
+- Whether AX2's left and right are latched in the same sample on the chip: they are written two
+  words apart; a frame edge between them would skew one channel by a sample. Not known.
+- After the DAC (analog only, not on the digital output): the DAC's own filter, the two low passes
+  (47.0 and 70.5 kHz, about 0.5 dB at 20 kHz together). The plug-in has the gain and the DC blocks.

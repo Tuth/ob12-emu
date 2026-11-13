@@ -17,7 +17,8 @@
   "paths": {
     "source_material": "F:\\MIZU\\OB-12\\docs and roms",
     "mame_reference": "F:\\MIZU\\MAME_ACCESS\\mame",
-    "unidasm": "F:\\MIZU\\MAME_ACCESS\\mame\\unidasm.exe"
+    "unidasm": "F:\\MIZU\\MAME_ACCESS\\mame\\unidasm.exe",
+    "sheets": "service manual PDF pages 2-17: sheets 01/15 to 15/15 in order; render with PyMuPDF (fitz) and read as images"
   },
   "gates": {
     "decode": "python tools/ob12_sysex.py \"F:/MIZU/OB-12/docs and roms/\"*.mid -o rom",
@@ -93,7 +94,8 @@
       "Panel: Osc2 Wave 1 and Wave 3 keys exchanged back (BUT5, BUT3), measured against the lamps",
       "A-017 Osc Common sliders: Split routing takes the filter inputs before the balance mix (DASP0 pointers C129 = 48, C12D = 9B from the Slave); firmware true, Serial makes the balance work",
       "Threads: Master's own thread removed, layout a setting (OB12_THREADS); about 0.7 of a core less at real time in both machine states, output identical",
-      "A-017 Split: timbre B-021 stores filter BALANCE 0 (A0 44, EDIT FILTERS ROUTING page), filter 1 only; Osc 2 is the silent FM modulator. Firmware and preset true"
+      "A-017 Split: timbre B-021 stores filter BALANCE 0 (A0 44, EDIT FILTERS ROUTING page), filter 1 only; Osc 2 is the silent FM modulator. Firmware and preset true",
+      "Signal path audit from the rendered sheets: FS 48.000 kHz from a 12.288 MHz oscillator; ATF1500 is the clock divider and host serializer, 74HC541 the clock fan out; S/PDIF and main DAC take DASP4 AX2 as it is, 24 bit I2S; PCM1716 setup confirmed against its data sheet"
     ],
     "blocked": []
   },
@@ -108,7 +110,7 @@
   },
   "audit_queue": [
     "CPU: both CPUs are 0.13 of a core; the five DSP cores are nearly all the work (6.6 us a sample each alone, 9-10 in the engine's slow state). Next: translate the DSP programs with the CR1 mode bits followed per word. Measure only in turn, several rounds: the machine has a fast and a slow state. Fast state margin of the new thread layout not confirmed",
-    "Signal path against the service manual, as Thor asks: what leaves DASP4 for the PCM1716 and for the S/PDIF output, sheet by sheet (rendered pages), and which of ATF1500, 74HC541, PCM1716 are modelled",
+    "Signal path audit done to the S/PDIF point (no difference found). Left: where AESEL comes from, the CS8402A straps against its data sheet (Thor has none yet), AX2 left/right latch time, aux output in the plug-in, analog low passes",
     "Osc 1 FM raises the level (A-001: +13.5 dB at maximum, to the rail): the differentiated waveform stage 0DA-0E8 with note-on coefficients; needs a unit's recording, FM 0 against maximum, same note",
     "A-017 loud digital noise: fits output clipping at Output gain +12 dB, not reproduced in the engine; ask Thor for a take at 0 dB, think about a limiter or a clip lamp in the plug-in",
     "Reverb, delay and chorus changed with the XMEM read time: listen against a unit's recording",
