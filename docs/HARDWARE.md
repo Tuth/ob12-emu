@@ -1810,6 +1810,23 @@ The filter section decoded (`OB12_CREADS=13.6 OB12_TRACE_CHIP=0 OB12_TRACE4_ALL=
   harmonics lead, so its gain is a side effect; the other eleven on the signal path change nothing.
   No single shift time explains it. Nothing changed in the engine.
 
+Following the voice to the filter (`OB12_CELL_LOG=0,0.5,0.53 OB12_CELL_PICK=...`, per sample):
+- Osc 1's output D48 is a saw of about +-0.05 (rms 0.025), the same on notes 24, 30, 3C, 48
+  (0.0253, 0.0264, 0.0242, 0.0287): its level does not hang on the pitch. C0C8 is 0.003086 on all
+  four (not a per note value, as the FM section above supposed).
+- The stage multiplies by C04C (1D333A, 0.228) on the way, a constant of the DSP program's own CMEM
+  that no host write touches; 0.228 squared is 0.052, the saw's height. Then x512 (0E3-0E8).
+- The filter takes D48 x C126 x16: unity at A-002 (C126 07FFFF).
+- After the filter all is linear: filter out (12D) rms 0.136 at C0, 0.738 at FF (14.7 dB), then
+  C125, the pan gains and the bus add carry both alike (bus 0.024 and 0.132).
+So the level that sets the gap is the filter state against its rail, and both ends come from the
+firmware's constants: the oscillator at about -26 dBFS into a unit-scale filter whose states clip
+at full scale. On the unit the self-oscillation sits only 3 dB over a resonant note, so either the
+unit's filter clips (or loses) about 12 dB lower, or its voice reaches the filter about 12 dB
+higher, by a rule of the chip not seen from inside the trace. Open; nothing changed. A same-volume
+take of one note at Resonance 0 and at 100 % on a unit would give the resonance gain curve and
+settle which.
+
 ## Panel: positions from the vector art, LCD as a dot matrix (measured)
 
 Thor: controls sit off the original, the Amp Attack slider seems missing, and the LCD strokes vary
