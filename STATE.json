@@ -123,7 +123,7 @@
     "Lamps Mono/Legato/Portamento/Unison dark: firmware LED image EC5B09 not updated on press; find the Master routine that sets it",
     "The Raver glide click: paired take-in tried (01b8766) and reverted: harness better, engine worse (3 spikes). Compare engine and harness per sample with the slot before another fix",
     "LEDs: all 89 mapped from the schematic; check by ear and eye in a host",
-    "Max resonance: firmware-true by Thor's decision (table FCD910 entry 7F = 0); revisit only with a real recording",
+    "Max resonance: a real recording now exists (A-002 at 50 % and 100 %, HARDWARE \"A real unit's recording\"): shapes match ours at pot C0 and FF, but real is +3 dB from one to the other, ours +15 dB; find what limits the lossless section about 12 dB below the rail (trace DASP0 D9D, D4F, D9E, D50). Firmware coefficients stay",
     "Delay: measure echo time against TIME and repeats against FEEDBACK on more programs",
     "Encoder: three detents at once step four programs",
     "PR #3: secondary 2D order is a fifth finding, send only with approval",

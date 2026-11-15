@@ -1749,6 +1749,43 @@ Not settled; nothing changed.
 Decision (Thor, 2026-11-07): Resonance 127 stays firmware-true, damping 0, no limiter. Revisit only
 with a recording of a real unit.
 
+### A real unit's recording: A-002 at Resonance 50 % and 100 % (measured, cause open)
+
+Thor's two takes from a demo video (`F:\OB-12\Brass OI unknown cutoff position Reso 50percent.wav`
+and `... Reso 100 percent.wav`, 48 kHz stereo, cutoff position unknown, recording chain unknown,
+volume not touched between them). One note, f0 131.3 Hz (C3, note 30). Steady part, left:
+
+| | rms | crest | fundamental's share of the energy |
+|---|---|---|---|
+| real, Resonance 50 % | -20.1 dBFS | 8.7 dB | -10 dB |
+| real, Resonance 100 % | -17.0 | 4.3 | -40 |
+
+So the real unit at 100 % is also lost in the resonance (the note 40 dB down, a strong line at
+about 3.1 kHz) and its waveform is squared off, yet it is only 3 dB louder than at 50 %.
+
+Here: A-002, note 30, Filters Frequency pot EC (puts the oscillation at 3.1-3.3 kHz, as the take),
+Resonance pot moved through FF first (the pot catches: moved straight to 00 it sends nothing, so the
+program's own value stays). Pot FC and above all give C12E 0. Left, 13.2-14.1 s:
+
+| Resonance pot | C12E | rms | crest | fundamental's share |
+|---|---|---|---|---|
+| 80 | 07D36D | -34.2 | 9.7 | -5 |
+| A0 | 056234 | -30.5 | | -8 |
+| C0 | 036436 | -25.0 | 8.3 | -13 |
+| E0 | | -12.2 | 6.1 | -27 |
+| FF | 000000 | -10.1 | 4.8 | -40 |
+
+- Shapes match: the take at 50 % looks like pot C0 here (crest 8.7 against 8.3, fundamental -10
+  against -13), the take at 100 % like FF (4.3 against 4.8, -40 against -40).
+- Levels do not: C0 to FF is +15 dB here, +3 dB on the real unit. About 12 dB, a factor of 4, two
+  bits, is missing somewhere between a resonant filter and a self-oscillating one.
+- Not settled: an AGC in the video's recording chain could squeeze the difference too. Thor's earlier
+  recollection (maximum resonance near the plain level) points the same way as the takes.
+- The Resonance pot is VR21, 10KB (linear) ALPS RK09, between VCC and ground (p38), so 50 % is
+  near 80; the real 50 % is more resonant than pot 80 here (fundamental -10 against -5 dB).
+- Next: trace the DASP0 filter words at FF (D9D, D4F, D9E, D50) for where the real chip could limit
+  the lossless section about 12 dB below the rail; the firmware's coefficients stay as they are.
+
 ## Panel: positions from the vector art, LCD as a dot matrix (measured)
 
 Thor: controls sit off the original, the Amp Attack slider seems missing, and the LCD strokes vary
