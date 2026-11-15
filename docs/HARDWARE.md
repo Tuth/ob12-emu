@@ -1786,6 +1786,30 @@ program's own value stays). Pot FC and above all give C12E 0. Left, 13.2-14.1 s:
 - Next: trace the DASP0 filter words at FF (D9D, D4F, D9E, D50) for where the real chip could limit
   the lossless section about 12 dB below the rail; the firmware's coefficients stay as they are.
 
+Thor, 2026-11-15: no AGC. In the same video Resonance 0 notes are much quieter than 15 % ones; those
+were cut in apart (the presenter likely turned the volume down when going to 50 %), so only the 50 %
+and 100 % takes are a level pair. Their +3 dB stands.
+
+The filter section decoded (`OB12_CREADS=13.6 OB12_TRACE_CHIP=0 OB12_TRACE4_ALL=1 OB12_TRACE_MAC=1`):
+- 117-11D: the input D48 x C126 (07FFFF here, 1/16) into MAC 0, stored x16 to D9C: unity.
+- 11C-11F: MAC 0 = 0.25 (D9C - D4E) - C12E x D4F (C1C9 = 200000 is 0.25); 120 sets the output shift
+  x4; 121 stores it as D9D: hp = (in - lp) - 4 q bp. 121-12B: two integrators each (C0D7, C0D8)
+  stored x4. So the section is a state variable filter at unit scale, the 0.25 and x4 cancelling,
+  and C12E 0 is lossless, as the firmware means.
+- The filter's input runs low: D48 rms 0.032 (C0) against the oscillators' 0.5-0.7 earlier on the
+  chip (0C0-0EE). At FF the states reach 0.54 rms and D9E sits at the rail; the output stage at
+  151-15C (x16 shift) clips too (D8C, D8D at 7FFFFF), at C0 nothing clips.
+- So against the clean sound the rail is about 25 dB up here, about 12 dB less on the unit. A filter
+  input 4 times (12 dB) higher would give the unit's +3 dB with everything else as it is, and is the
+  same factor as "the dry programs are about 13 dB too quiet" below. Not shown; where a 4 could be
+  lost is not found.
+- Product-time output shift word by word (`OB12_SHIFT_PRODUCT=1 OB12_SHIFT_PCS=9:pc`) for the 25 DASP0
+  words whose read shift differs from their product's, C0 / FF rms (now -25.0 / -10.1): 121 (the hp
+  store) -36.4 / -16.5, damping 4 times and no longer reaching the rail, wrong way; 0AE -14.2 / -10.0
+  (+4.2 dB, near the unit) but it detunes the oscillator (131.4 to 130.6 Hz) and makes the even
+  harmonics lead, so its gain is a side effect; the other eleven on the signal path change nothing.
+  No single shift time explains it. Nothing changed in the engine.
+
 ## Panel: positions from the vector art, LCD as a dot matrix (measured)
 
 Thor: controls sit off the original, the Amp Attack slider seems missing, and the LCD strokes vary
