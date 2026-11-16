@@ -9,6 +9,13 @@ the sound comes from the machine's own code.
 manual artwork. The decoder in `tools/` turns the official OB-12 SysEx update files (`.mid`)
 into the images the emulator loads, in `rom/`, which git ignores.
 
+**Ready to play:** the [releases](https://github.com/Tuth/ob12-emu/releases) hold a VST3 bundle
+for Windows x64 with the firmware included. The firmware is decoded from the community archive at
+https://ob12.clearalgo.com/ and remains copyright Viscount International. It is included for
+personal and archival use, not for commercial redistribution. The release binary is built from
+the tagged source: rebuilt with the build order below, its code is byte for byte the same, and
+only the link timestamps differ.
+
 ## Status
 
 - The whole instrument on one thread at about 0.2 of a core, bit identical from run to run.
