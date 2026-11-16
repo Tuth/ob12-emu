@@ -164,5 +164,6 @@
   "reference_md5": "7a47ad74c1612850a09ab8639650b691",
   "host_bursts": "Host update words taken in per chip select (16 words), at the next sample start. A-018 pops gone; first note after program change still has one spike. OB12_HOST_SINGLE=1 old model.",
   "controllers": "VST3 IMidiMapping: CC 0-127, aftertouch, pitch bend forwarded to the Master.",
+  "release": "Public at github.com/Tuth/ob12-emu (GPL-3.0). v0.10.0 = build/next10 OB12.vst3 (SHA-256 C5C86611...4964) with rom/ inside the bundle: firmware included by Thor's exception 2026-11-16, source https://ob12.clearalgo.com/ (personal and archival use, not commercial). Tag f48a7c5 rebuilds it with .text/.data/.pdata identical. Repo itself still holds no firmware.",
   "xmem_read": "DASP4 XMEM read data lands 5 words after the read (options4.xread_cycles). VST3 with it in build/next10 (translated DSP programs, one thread); OB12_XREAD_CYCLES=0 in ob12_system is the old table."
 }
