@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>OB-12 Audio Unit @VERSION@</title>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <volume-check>
+        <allowed-os-versions><os-version min="11.0"/></allowed-os-versions>
+    </volume-check>
+    <choices-outline>
+        <line choice="component"/>
+    </choices-outline>
+    <choice id="component" visible="false" title="OB-12 Audio Unit">
+        <pkg-ref id="com.tuth.ob12.au.component"/>
+    </choice>
+    <pkg-ref id="com.tuth.ob12.au.component" version="@VERSION@" onConclusion="none">OB12-component.pkg</pkg-ref>
+</installer-gui-script>

@@ -29,7 +29,13 @@ public:
     void send_sysex(const uint8_t* bytes, int count, int gap_ms = 100);
     int sysex_waiting() const;                           // messages not yet sent
     // The sysex of a .syx file, or of a Standard MIDI File's F0 events, as F0 ... F7 messages.
-    static std::string read_sysex(const std::wstring& path, std::vector<uint8_t>& out);
+    // A file name as the system's file dialogs give it: UTF-16 on Windows, UTF-8 elsewhere.
+#ifdef _WIN32
+    using Path = std::wstring;
+#else
+    using Path = std::string;
+#endif
+    static std::string read_sysex(const Path& path, std::vector<uint8_t>& out);
     // Back to the factory memory: the stored flash is deleted and no longer written this session.
     void forget_flash();
     // MIDI OUT's system exclusive since the last take, as F0 ... F7 messages: a bulk dump from

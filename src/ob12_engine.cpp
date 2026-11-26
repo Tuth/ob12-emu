@@ -1,8 +1,4 @@
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#undef min
-#undef max
+#include "platform.h"
 #include "emu.h"
 #include "f2mc16.h"
 #include "mb90611.h"
@@ -15,12 +11,10 @@
 #include <deque>
 #include <fstream>
 #include <functional>
-#include <immintrin.h>
 #include <map>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
-#pragma comment(lib, "synchronization.lib")
 
 #define OB12_NO_MAIN
 namespace master {
@@ -40,9 +34,9 @@ struct Gate {
     void open(int workers) {
         left.store(workers, std::memory_order_relaxed);
         go.fetch_add(1, std::memory_order_seq_cst);
-        if (sleepers.load(std::memory_order_seq_cst)) WakeByAddressAll(&go);
+        if (sleepers.load(std::memory_order_seq_cst)) ob12::wake_all(go);
     }
-    void wait() { while (left.load(std::memory_order_acquire)) _mm_pause(); }
+    void wait() { while (left.load(std::memory_order_acquire)) ob12::cpu_relax(); }
     void done() { left.fetch_sub(1, std::memory_order_release); }
 };
 
@@ -51,11 +45,11 @@ static int spin_limit = getenv("OB12_SPIN") ? atoi(getenv("OB12_SPIN")) : 2000;
 static void wait_for(Gate& gate, long seen, const std::atomic<bool>& stop) {
     for (int spins = 0; spins < spin_limit; spins++) {
         if (gate.go.load(std::memory_order_acquire) != seen) return;
-        _mm_pause();
+        ob12::cpu_relax();
     }
     gate.sleepers.fetch_add(1, std::memory_order_seq_cst);
     while (gate.go.load(std::memory_order_seq_cst) == seen && !stop.load(std::memory_order_relaxed))
-        WaitOnAddress(&gate.go, &seen, sizeof seen, 5);
+        ob12::wait_on(gate.go, seen, 5);
     gate.sleepers.fetch_sub(1, std::memory_order_seq_cst);
 }
 
@@ -176,8 +170,14 @@ struct Engine::Impl {
     std::vector<KeyEvent> key_events;
     struct PotEvent { int channel, mux, value; };
     std::vector<PotEvent> pot_events;
-    int turns = 0, enc_detents = 0;
+    int turns = 0;
+    // The data encoder. enc_queue: detents asked for and not yet begun, kept to a few as a real
+    // encoder does not store turns (an unbounded queue played a fast spin for seconds after it).
+    // enc_dir: the detent being played out, +1 or -1; it always finishes its four quarters, so a
+    // quick reversal never leaves the A and B lines halfway or runs a detent backwards midway.
+    int enc_queue = 0, enc_dir = 0;
     long enc_start = 0;
+    static constexpr int enc_queue_max = 4;
 
     mutable std::mutex lcd_lock;
     uint8_t lcd_copy[30 * 64] = {};
@@ -263,7 +263,7 @@ struct Engine::Impl {
             }
             if (!f) return;
         }
-        MoveFileExA(temp.c_str(), flash_path.c_str(), MOVEFILE_REPLACE_EXISTING);
+        ob12::replace_file(temp, flash_path);
         flash_dirty = false;
     }
     void watch_flash() {  // every millisecond, on the engine's thread
@@ -280,7 +280,7 @@ struct Engine::Impl {
         if (!midi_bytes.empty()) { m->midi_in(midi_bytes); midi_bytes.clear(); }
         if (forget) {
             forget = false;
-            if (!flash_path.empty()) DeleteFileA(flash_path.c_str());
+            if (!flash_path.empty()) ob12::delete_file(flash_path);
             flash_path.clear();
             flash_dirty = false;
         }
@@ -297,21 +297,30 @@ struct Engine::Impl {
         key_events.clear();
         for (auto& e : pot_events) m->pot_live[e.channel][e.mux] = (short)e.value;
         pot_events.clear();
-        enc_detents += turns;
+        enc_queue = std::max(-enc_queue_max, std::min(enc_queue_max, enc_queue + turns));
         turns = 0;
     }
 
     void encoder_step() {
-        if (!enc_detents) return;
-        if (!enc_start) enc_start = k;
+        if (!enc_dir) {
+            if (!enc_queue) return;
+            enc_dir = enc_queue > 0 ? 1 : -1;
+            enc_queue -= enc_dir;
+            enc_start = k;
+        }
         int phase = (int)((k - enc_start) / 384);  // 4 ms per quarter
         static const int a_first[4][2] = {{0, 1}, {0, 0}, {1, 0}, {1, 1}};
         int i = phase & 3;
-        if (enc_detents > 0) m->enc_set(a_first[i][0], a_first[i][1]);
+        if (enc_dir > 0) m->enc_set(a_first[i][0], a_first[i][1]);
         else m->enc_set(a_first[i][1], a_first[i][0]);
         if (phase >= 4) {
-            enc_detents += enc_detents > 0 ? -1 : 1;
-            enc_start = enc_detents ? k : 0;
+            if (enc_queue && (enc_queue > 0) == (enc_dir > 0)) {  // the next detent the same way follows at once
+                enc_queue -= enc_dir;
+                enc_start = k;
+            } else {
+                enc_dir = 0;
+                enc_start = 0;
+            }
         }
     }
 
@@ -334,12 +343,12 @@ struct Engine::Impl {
         }
         slice = k % 3 == 2 ? 166 : 167;  // 16 MHz: 500 cycles per three half frames
         if (!master_thread) {
-            uint64_t t0 = __rdtsc();
+            uint64_t t0 = ob12::ticks();
             m->run(slice); m->tick(m->executed());
-            uint64_t t1 = __rdtsc();
+            uint64_t t1 = ob12::ticks();
             s->run(slice); s->tick(s->executed());
             spent_master.ticks += t1 - t0;
-            spent_slave.ticks += __rdtsc() - t1;
+            spent_slave.ticks += ob12::ticks() - t1;
         } else {
             cpu_gate.open(1);
             s->run(slice); s->tick(s->executed());
@@ -357,7 +366,7 @@ struct Engine::Impl {
     // One chip through both half frames of a batch, on its own worker.
     void chip_batch(int n) {
         long b = dsp_batch;
-        uint64_t began = __rdtsc();
+        uint64_t began = ob12::ticks();
         int now = b & 1, before = now ^ 1;
         Host& h = host[n];
         tms::Core* d = h.dsp;
@@ -382,7 +391,7 @@ struct Engine::Impl {
             if (h.running) d->run(256);
             memcpy(snap[now][part][n], d->ax, sizeof d->ax);
         }
-        spent_chip[n].ticks += __rdtsc() - began;
+        spent_chip[n].ticks += ob12::ticks() - began;
     }
 
     long dsp_batch = 0;
@@ -393,16 +402,16 @@ struct Engine::Impl {
     void next_batch() {
         filling = batch & 1;
         if (batch == time_from) { for (auto& c : spent_chip) c.ticks = 0; spent_cpu.ticks = spent_wait.ticks = spent_master.ticks = spent_slave.ticks = 0; }
-        uint64_t began = __rdtsc();
+        uint64_t began = ob12::ticks();
         half = 0;
         cpu_slice();
         half = 1;
         cpu_slice();
-        uint64_t slices = __rdtsc();
+        uint64_t slices = ob12::ticks();
         spent_cpu.ticks += slices - began;
         if (batch > 0) {
             if (groups.size() > 1) dsp_gate.wait();
-            spent_wait.ticks += __rdtsc() - slices;
+            spent_wait.ticks += ob12::ticks() - slices;
             const int32_t* frame = snap[(batch - 1) & 1][1][4][1];  // MOUT after the odd half frame
             out[made * 2] = frame[0];
             out[made * 2 + 1] = frame[1];
@@ -491,12 +500,14 @@ Engine::Engine(const std::string& rom_dir) : impl(new Impl) {
     // threads on the two halves of one core slow each other, the spinning one as much as a working one.
     static int spread = getenv("OB12_SPREAD") ? atoi(getenv("OB12_SPREAD")) : 0;
     for (size_t g = 1; g < e.groups.size(); g++) e.workers.emplace_back([&e, g]() {
+#ifdef _WIN32
         if (spread) {
             SYSTEM_INFO info; GetSystemInfo(&info);
             DWORD logical = 2 * (DWORD)g % info.dwNumberOfProcessors;
             if (spread == 2) SetThreadAffinityMask(GetCurrentThread(), (DWORD_PTR)1 << logical);
             else SetThreadIdealProcessor(GetCurrentThread(), logical);
         }
+#endif
         long seen = 0;
         for (;;) {
             wait_for(e.dsp_gate, seen, e.stop);
@@ -538,7 +549,7 @@ void Engine::forget_flash() {
     impl->input_waiting = true;
 }
 
-std::string Engine::read_sysex(const std::wstring& path, std::vector<uint8_t>& out) {
+std::string Engine::read_sysex(const Engine::Path& path, std::vector<uint8_t>& out) {
     std::ifstream f(path, std::ios::binary);
     std::vector<uint8_t> b((std::istreambuf_iterator<char>(f)), {});
     if (b.empty()) return "cannot read the file";
@@ -591,7 +602,7 @@ Engine::~Engine() {
     if (getenv("OB12_TIME_LOG")) {
         // us per sample of sound, taking the counter at its nominal rate (the first 2 s calibrate it)
         static double rate = 0;
-        if (!rate) { uint64_t a = __rdtsc(); Sleep(200); rate = (__rdtsc() - a) / 0.2; }
+        if (!rate) { uint64_t a = ob12::ticks(); ob12::sleep_ms(200); rate = (ob12::ticks() - a) / 0.2; }
         double samples = impl->batch > impl->time_from && impl->time_from > 48000 ? (double)(impl->batch - impl->time_from) : impl->batch ? (double)impl->batch : 1;
         auto us = [&](uint64_t ticks) { return ticks / rate * 1e6 / samples; };
         printf("us a sample: CPUs (both slices, with the Master wait if it has a thread) %.2f, wait for chips %.2f, chips", us(impl->spent_cpu.ticks), us(impl->spent_wait.ticks));
