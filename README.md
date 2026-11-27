@@ -22,6 +22,7 @@ only the link timestamps differ.
 - Master: the RTOS boots, the LCD (T6963C) works, presets load, and panel data and MIDI reach the Slave.
 - Slave: it allocates 12 voices, 3 per DSP, loads the DSP programs and runs the summing bus to the outputs.
 - A standalone player with a front panel (Direct2D) and a VST3 instrument (Windows x64).
+- An Audio Unit instrument for macOS (Apple Silicon and Intel), with a `.pkg` installer.
 - Known open question: at maximum Resonance the level rises more than a real unit's recording
   suggests. The firmware drives the filter, so the gap lies in undocumented DSP behaviour or the
   analog output stage. See `docs/HARDWARE.md`.
@@ -48,6 +49,20 @@ Steinberg VST3 SDK, set in `OB12_VST3SDK`. The batch files hold the author's pat
 2. Carve the DSP programs:
    `python tools/ob12_carve.py rom/12dsp111-DSP-v1.11-FINAL.bin -o rom/dsp`
 3. Build in this order: `tools/build_master.bat`, `tools/build_engine.bat`, `tools/build_vst3.bat`.
+
+## Building (macOS): Audio Unit and installer
+
+`mac/` holds an Audio Unit v2 instrument (aumu `Ob12`, maker `Tuth`) written against AudioToolbox
+alone, the panel drawn with Core Graphics, and a script that builds a universal (arm64 + x86_64)
+component and a `.pkg` installer. It needs only the Command Line Tools (`xcode-select --install`).
+
+    bash mac/build_au.sh <rom folder> [--install] [--no-pkg]
+
+The script carves the DSP programs and generates `tms_fast.inc` itself, puts the firmware in the
+bundle's `Contents/Resources/rom`, signs ad hoc (or with `OB12_SIGN` / `OB12_INSTALLER_SIGN`),
+runs `auval` with `--install`, and writes `build/mac/OB12-AU-<version>.pkg`, which installs to
+`/Library/Audio/Plug-Ins/Components`. The unit's flash and the panel settings live in
+`~/Library/Application Support/OB12`. The engine's few system calls are in `src/platform.h`.
 
 `STATE.json` lists every gate and its pass condition. `docs/HARDWARE.md` is the full research log.
 

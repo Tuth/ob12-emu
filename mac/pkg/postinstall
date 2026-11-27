@@ -1,0 +1,4 @@
+#!/bin/bash
+# Make the new component visible at once: the registrar rescans when it restarts.
+killall -9 AudioComponentRegistrar 2>/dev/null || true
+exit 0
