@@ -182,6 +182,7 @@ struct Plugin {
     std::shared_ptr<Instrument> instrument;
     std::atomic<Instrument*> live{nullptr};  // the same, for the audio thread
     std::vector<Listener> listeners;
+    std::mutex listener_lock;  // listeners are added and removed while properties change
     std::vector<Notify> notifies;
     std::mutex notify_lock;
 
@@ -195,7 +196,11 @@ struct Plugin {
     }
 
     void changed(AudioUnitPropertyID id, AudioUnitScope scope, AudioUnitElement element) {
-        std::vector<Listener> copy = listeners;
+        std::vector<Listener> copy;
+        {
+            std::lock_guard<std::mutex> hold(listener_lock);
+            copy = listeners;
+        }
         for (auto& l : copy) if (l.id == id) l.proc(l.data, instance, id, scope, element);
     }
 
@@ -298,7 +303,8 @@ OSStatus get_property(Plugin* p, AudioUnitPropertyID id, AudioUnitScope scope, A
         *(UInt32*)data = scope == kAudioUnitScope_Input ? 0 : 1;
         return noErr;
     case kAudioUnitProperty_ParameterList: return noErr;
-    case kAudioUnitProperty_Latency: *(Float64*)data = 0; return noErr;
+    // The ring keeps lead_frames of the engine's 48 kHz ahead: the host can line the instrument up.
+    case kAudioUnitProperty_Latency: *(Float64*)data = lead_frames / 48000.0; return noErr;
     case kAudioUnitProperty_TailTime: *(Float64*)data = 0; return noErr;
     case kAudioUnitProperty_SupportedNumChannels: {
         AUChannelInfo info = {0, 2};
@@ -381,8 +387,9 @@ OSStatus set_property(Plugin* p, AudioUnitPropertyID id, AudioUnitScope scope, A
     case kAudioUnitProperty_MaximumFramesPerSlice: {
         UInt32 n = *(const UInt32*)data;
         if (n == 0) return kAudioUnitErr_InvalidPropertyValue;
+        // Not while initialized: au_render may be using the buffers sized for the old value.
+        if (p->initialized) return n == p->max_frames ? noErr : kAudioUnitErr_Initialized;
         p->max_frames = n;
-        if (p->initialized) for (auto& b : p->own) b.assign(n, 0.f);
         p->changed(kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0);
         return noErr;
     }
@@ -453,17 +460,20 @@ OSStatus au_set_property(void* self, AudioUnitPropertyID id, AudioUnitScope scop
 }
 
 OSStatus au_add_listener(void* self, AudioUnitPropertyID id, AudioUnitPropertyListenerProc proc, void* data) {
+    std::lock_guard<std::mutex> hold(me(self)->listener_lock);
     me(self)->listeners.push_back({id, proc, data});
     return noErr;
 }
 
 OSStatus au_remove_listener(void* self, AudioUnitPropertyID id, AudioUnitPropertyListenerProc proc) {
+    std::lock_guard<std::mutex> hold(me(self)->listener_lock);
     auto& l = me(self)->listeners;
     l.erase(std::remove_if(l.begin(), l.end(), [&](const Listener& x) { return x.id == id && x.proc == proc; }), l.end());
     return noErr;
 }
 
 OSStatus au_remove_listener_data(void* self, AudioUnitPropertyID id, AudioUnitPropertyListenerProc proc, void* data) {
+    std::lock_guard<std::mutex> hold(me(self)->listener_lock);
     auto& l = me(self)->listeners;
     l.erase(std::remove_if(l.begin(), l.end(), [&](const Listener& x) { return x.id == id && x.proc == proc && x.data == data; }), l.end());
     return noErr;

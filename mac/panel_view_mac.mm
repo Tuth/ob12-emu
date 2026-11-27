@@ -9,6 +9,7 @@
 #else
 #import <AudioUnit/AUCocoaUIView.h>
 #endif
+#include <unistd.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <vector>
 #include "ob12_engine.h"
 #include "panel_controls.h"
@@ -29,6 +31,9 @@
 #ifndef OB12_PANEL_CLASS
 #define OB12_PANEL_CLASS OB12_PanelView_0A00
 #endif
+#ifndef OB12_LCD_CLASS
+#define OB12_LCD_CLASS OB12_LCDView_0A00
+#endif
 
 namespace {
 
@@ -39,6 +44,7 @@ struct Run {
     std::vector<uint8_t> kinds;
     std::vector<float> points;
     CGPathRef path = nullptr;
+    CGRect bounds = CGRectNull;  // art units, with the stroke: lets the magnifier skip what it does not show
     bool moving = false;
 };
 
@@ -82,6 +88,39 @@ void save_width(int width) {
     if (FILE* f = fopen(width_file().c_str(), "w")) { fprintf(f, "%d\n", width); fclose(f); }
 }
 
+// The magnifier: on or off, its zoom and its diameter on the screen in millimetres. Per user.
+const int strip_height = 30;  // the bar under the panel that holds the magnifier's button
+const float loupe_zooms[3] = {1.5f, 2.f, 2.5f}, loupe_sizes[4] = {30, 35, 40, 50};
+struct LoupeSettings { bool on = false; float zoom = 2.5f, mm = 35; };
+std::string loupe_file() { return ob12mac::support_folder(true) + "/magnifier.txt"; }
+LoupeSettings load_loupe() {
+    LoupeSettings l;
+    if (FILE* f = fopen(loupe_file().c_str(), "r")) {
+        int on = 0; float zoom = 0, mm = 0;
+        if (fscanf(f, "%d %f %f", &on, &zoom, &mm) == 3) {
+            l.on = on != 0;
+            if (zoom >= 1.5f && zoom <= 2.5f) l.zoom = zoom;  // a 3x or 4x saved earlier comes back as 2.5x
+            else if (zoom > 2.5f) l.zoom = 2.5f;
+            if (mm >= 30 && mm <= 50) l.mm = mm;
+            else if (mm > 50) l.mm = 50;
+        }
+        fclose(f);
+    }
+    return l;
+}
+std::string lcd_window_file() { return ob12mac::support_folder(true) + "/lcd_window.txt"; }
+bool load_lcd_window() {
+    int on = 0;
+    if (FILE* f = fopen(lcd_window_file().c_str(), "r")) { if (fscanf(f, "%d", &on) != 1) on = 0; fclose(f); }
+    return on != 0;
+}
+void save_lcd_window(bool on) {
+    if (FILE* f = fopen(lcd_window_file().c_str(), "w")) { fprintf(f, "%d\n", on ? 1 : 0); fclose(f); }
+}
+void save_loupe(const LoupeSettings& l) {
+    if (FILE* f = fopen(loupe_file().c_str(), "w")) { fprintf(f, "%d %.2f %.1f\n", l.on ? 1 : 0, l.zoom, l.mm); fclose(f); }
+}
+
 // Draw an image or layer made in y-up space into the flipped view so it stands upright.
 void draw_upright_image(CGContextRef c, CGImageRef image, CGRect r) {
     CGContextSaveGState(c);
@@ -109,6 +148,34 @@ struct PanelArt {
     uint8_t lcd_bits[30 * 64];
     uint8_t lcd_shown[30 * 64] = {};
     bool lcd_valid = false;
+    bool lcd_have = false;  // lcd_shown holds a real frame (the magnifier draws from it)
+    bool lcd_pending = false;  // lcd_shown changed since the LCD bitmap was made
+    uint8_t leds_shown[16] = {};
+
+    // Asked by the clock, so that only what changed is redrawn.
+    bool poll_lcd() {
+        if (!engine.lcd(lcd_bits)) return false;
+        if (lcd_have && memcmp(lcd_bits, lcd_shown, sizeof lcd_bits) == 0) return false;
+        memcpy(lcd_shown, lcd_bits, sizeof lcd_bits);
+        lcd_have = lcd_pending = true;
+        return true;
+    }
+    // The lamps that changed, as an area in view units (null: none). A blinking tempo lamp
+    // redrew the whole panel at each blink.
+    CGRect poll_leds() {
+        uint8_t now[16];
+        engine.leds(now);
+        if (memcmp(now, leds_shown, sizeof now) == 0) return CGRectNull;
+        float s = sx();
+        CGRect area = CGRectNull;
+        for (const PanelLed& led : panel_leds) {
+            if ((now[led.latch] >> led.bit & 1) == (leds_shown[led.latch] >> led.bit & 1)) continue;
+            float r = (led.lamp ? 5.6f : 3.1f) * 1.6f * s + 3;
+            area = CGRectUnion(area, CGRectMake(left() + led.x * s - r, led.y * s - r, 2 * r, 2 * r));
+        }
+        memcpy(leds_shown, now, sizeof now);
+        return area;
+    }
     CGImageRef lcd_image = nullptr;
     int lcd_w = 0, lcd_h = 0;
     CGLayerRef art_layer = nullptr;
@@ -122,32 +189,46 @@ struct PanelArt {
         for (auto& r : runs) if (r.path) CGPathRelease(r.path);
         if (lcd_image) CGImageRelease(lcd_image);
         if (art_layer) CGLayerRelease(art_layer);
+        forget_zoom_layer();
     }
 
     void load(const std::string& path) {
         std::ifstream f(path, std::ios::binary);
         std::vector<char> data((std::istreambuf_iterator<char>(f)), {});
         if (data.size() < 16 || memcmp(data.data(), "OB12", 4)) return;
+        // Every read is checked against the end: a short or damaged file leaves no art, not a crash.
         const char* p = data.data() + 4;
-        auto u32 = [&]() { uint32_t v; memcpy(&v, p, 4); p += 4; return v; };
-        auto f32 = [&]() { float v; memcpy(&v, p, 4); p += 4; return v; };
+        const char* end = data.data() + data.size();
+        bool ok = true;
+        auto take = [&](void* out, size_t n) {
+            if (!ok || (size_t)(end - p) < n) { ok = false; memset(out, 0, n); return; }
+            memcpy(out, p, n);
+            p += n;
+        };
+        auto u8 = [&]() { uint8_t v; take(&v, 1); return v; };
+        auto u32 = [&]() { uint32_t v; take(&v, 4); return v; };
+        auto f32 = [&]() { float v; take(&v, 4); return v; };
         uint32_t count = u32();
         art_w = f32();
         art_h = f32();
+        if (!ok || count > (size_t)(end - p) / 13) { runs.clear(); return; }  // 13: the smallest run
         runs.resize(count);
         for (auto& r : runs) {
             r.argb = u32();
-            r.mode = (uint8_t)*p++;
+            r.mode = u8();
             r.width = f32();
             uint32_t commands = u32();
+            if (!ok || commands > (size_t)(end - p)) { ok = false; break; }
             r.kinds.reserve(commands);
-            for (uint32_t i = 0; i < commands; i++) {
-                uint8_t kind = (uint8_t)*p++;
+            for (uint32_t i = 0; i < commands && ok; i++) {
+                uint8_t kind = u8();
                 r.kinds.push_back(kind);
                 int n = kind == 2 ? 3 : kind == 3 ? 0 : 1;
                 for (int j = 0; j < n * 2; j++) r.points.push_back(f32());
             }
+            if (!ok) break;
         }
+        if (!ok) { runs.clear(); return; }
         fix_art();
     }
 
@@ -374,6 +455,7 @@ struct PanelArt {
                 }
             }
             r.path = path;
+            r.bounds = CGRectInset(CGPathGetBoundingBox(path), -r.width - 1, -r.width - 1);
         }
     }
 
@@ -490,13 +572,23 @@ struct PanelArt {
         CGContextRestoreGState(c);
     }
 
-    void draw_moving(CGContextRef c) {
+    // seen: the part in view, in units after the left shift; a control outside it is not drawn.
+    void draw_moving(CGContextRef c, CGRect seen = CGRectInfinite) {
         int count = sizeof panel_pots / sizeof panel_pots[0];
         float scale = art_scale();
         const float f = sx();
+        auto in_view = [&](const Moving& m, bool slider) {
+            if (CGRectIsInfinite(seen)) return true;
+            CGRect box = slider ? CGRectMake(m.bx0, m.by0 - m.travel, m.bx1 - m.bx0, m.by1 - m.by0 + m.travel)
+                                : CGRectMake(m.cx - 2 * m.radius - 2, m.cy - 2 * m.radius - 2, 4 * m.radius + 4, 4 * m.radius + 4);
+            if (!slider && m.radius <= 0) box = CGRectMake(m.cx - 60, m.cy - 60, 120, 120);
+            box = CGRectMake(box.origin.x * scale, box.origin.y * scale, box.size.width * scale, box.size.height * scale);
+            return (bool)CGRectIntersectsRect(box, seen);
+        };
         for (int i = 0; i < count; i++) {
             const PanelPot& p = panel_pots[i];
             if (!p.slider || !moving[i].found) continue;
+            if (!CGRectIsInfinite(seen) && !CGRectIntersectsRect(CGRectMake((p.x - 6) * f, (p.y - 46) * f, 12 * f, 130 * f), seen)) continue;
             float top = p.y - 44.6f, bottom = p.y + 81;
             set_fill(c, panel_blue);
             CGContextFillRect(c, CGRectMake((p.x - 5.2f) * f, top * f, 10.4f * f, (bottom + 0.9f - top) * f));
@@ -520,11 +612,11 @@ struct PanelArt {
         };
         for (int i = 0; i < count; i++) {
             const Moving& m = moving[i];
-            if (!m.found) continue;
+            if (!m.found || !in_view(m, panel_pots[i].slider)) continue;
             float value = pot_value[i] / 255.f;
             draw_part(m, panel_pots[i].slider, value, m.lo + value * (m.hi - m.lo) - m.rest);
         }
-        if (dial.found) draw_part(dial, false, 0, dial_angle);
+        if (dial.found && in_view(dial, false)) draw_part(dial, false, 0, dial_angle);
     }
 
     static void dot_cover(int pixels, int cells, std::vector<int>& first, std::vector<float>& cover) {
@@ -548,12 +640,10 @@ struct PanelArt {
         int x0 = (int)lroundf(panel_lcd_x0 * s), y0 = (int)lroundf(panel_lcd_y0 * s);
         int w = (int)lroundf(panel_lcd_x1 * s) - x0, h = (int)lroundf(panel_lcd_y1 * s) - y0;
         if (w < 8 || h < 4) return;
-        bool fresh = engine.lcd(lcd_bits);
-        if (!fresh && !lcd_valid) return;
-        bool changed = fresh && memcmp(lcd_bits, lcd_shown, sizeof lcd_bits) != 0;
-        if (!lcd_image || w != lcd_w || h != lcd_h) changed = true;
+        if (!lcd_have) return;
+        bool changed = lcd_pending || !lcd_valid || !lcd_image || w != lcd_w || h != lcd_h;
+        lcd_pending = false;
         if (changed) {
-            if (fresh) memcpy(lcd_shown, lcd_bits, sizeof lcd_bits);
             std::vector<int> fx, fy;
             std::vector<float> cx, cy;
             dot_cover(w, 240, fx, cx);
@@ -596,7 +686,29 @@ struct PanelArt {
         CGContextSetInterpolationQuality(c, kCGInterpolationDefault);
     }
 
-    void paint(CGContextRef c, float backing) {
+    // The area a control covers in view units, with its marks and shadow: what to redraw when it moves.
+    CGRect dial_rect() const {
+        float s = sx(), r = (panel_dial_r + 24) * s;
+        return CGRectMake(left() + panel_dial_x * s - r, panel_dial_y * s - r, 2 * r, 2 * r);
+    }
+    CGRect pot_rect(int i) const {
+        const PanelPot& p = panel_pots[i];
+        float s = sx();
+        CGRect r = p.slider ? CGRectMake(p.x - 26, p.y - 66, 52, 160) : CGRectMake(p.x - 48, p.y - 48, 96, 96);
+        return CGRectMake(left() + r.origin.x * s, r.origin.y * s, r.size.width * s, r.size.height * s);
+    }
+    CGRect drag_rect() const {
+        if (drag_pot >= 0) return pot_rect(drag_pot);
+        if (drag_dial) return dial_rect();
+        return CGRectNull;
+    }
+
+    CGRect lcd_rect() const {
+        float s = sx();
+        return CGRectInset(CGRectMake(left() + panel_lcd_x0 * s, panel_lcd_y0 * s, (panel_lcd_x1 - panel_lcd_x0) * s, (panel_lcd_y1 - panel_lcd_y0) * s), -2, -2);
+    }
+
+    void paint(CGContextRef c, float backing, CGRect dirty) {
         if (!art_layer || art_backing != backing) { render_art(c); art_backing = backing; }
         set_fill(c, panel_blue);
         CGContextFillRect(c, CGRectMake(0, 0, width, height));
@@ -607,13 +719,20 @@ struct PanelArt {
             CGContextDrawLayerAtPoint(c, CGPointZero, art_layer);
             CGContextRestoreGState(c);
         }
+        draw_dynamic(c, backing, false, dirty);
+    }
+
+    // The moving parts, LCD, lamps and marks, over the static art. visible: view units; with
+    // vector_lcd the LCD is drawn as dots (sharp at any magnification) instead of the cached bitmap.
+    void draw_dynamic(CGContextRef c, float backing, bool vector_lcd, CGRect visible) {
         float s = sx();
         CGContextSaveGState(c);
         CGContextTranslateCTM(c, left(), 0);
-        draw_lcd(c, backing);
-        draw_moving(c);
+        if (vector_lcd) draw_lcd_vector(c, CGRectOffset(visible, -left(), 0));
+        else draw_lcd(c, backing);
+        draw_moving(c, CGRectOffset(CGRectInset(visible, -12, -12), -left(), 0));
         uint8_t latches[16];
-        engine.leds(latches);
+        memcpy(latches, leds_shown, sizeof latches);
         for (const PanelLed& led : panel_leds) {
             if (!(latches[led.latch] >> led.bit & 1)) continue;
             float x = led.x * s, y = led.y * s;
@@ -651,6 +770,102 @@ struct PanelArt {
             CGContextFillEllipseInRect(c, CGRectMake((k.x - 21) * s, (k.y - 12) * s, 42 * s, 24 * s));
         }
         CGContextRestoreGState(c);
+    }
+
+    // The static art drawn as vectors, only the runs that reach `visible` (view units): for the
+    // magnifier, sharp at any zoom where the cached layer would be blurred.
+    void draw_static_vector(CGContextRef c, CGRect visible) {
+        set_fill(c, panel_blue);
+        CGContextFillRect(c, visible);
+        float scale = art_scale();
+        if (scale <= 0) return;
+        CGRect art_visible = CGRectMake((visible.origin.x - left()) / scale, visible.origin.y / scale,
+                                        visible.size.width / scale, visible.size.height / scale);
+        CGContextSaveGState(c);
+        CGContextTranslateCTM(c, left(), 0);
+        CGContextScaleCTM(c, scale, scale);
+        int depth = 0;
+        for (auto& r : runs) {
+            if (r.moving) continue;
+            if (r.mode < 4 && !CGRectIntersectsRect(r.bounds, art_visible)) continue;
+            draw_run(c, r, depth);
+        }
+        while (depth--) CGContextRestoreGState(c);
+        CGContextRestoreGState(c);
+        if (visible.origin.x < left()) draw_panel_c(c);  // its text is the costly part: only when seen
+    }
+
+    // The LCD as one rectangle a dot, for the cells inside `visible` (units after the left shift).
+    void draw_lcd_vector(CGContextRef c, CGRect visible) {
+        // Not lcd_valid: a change of screen resolution clears it while the bitmap is still shown,
+        // and the magnifier then showed the art's empty LCD glass, black, until the text changed.
+        if (!lcd_have) return;
+        float s = sx();
+        float x0 = panel_lcd_x0 * s, y0 = panel_lcd_y0 * s;
+        float w = (panel_lcd_x1 - panel_lcd_x0) * s, h = (panel_lcd_y1 - panel_lcd_y0) * s;
+        CGRect lcd = CGRectMake(x0, y0, w, h);
+        CGRect part = CGRectIntersection(lcd, visible);
+        if (CGRectIsNull(part) || CGRectIsEmpty(part)) return;
+        const float px = w / 240, py = h / 64, dot = 0.86f;
+        CGContextSetRGBFillColor(c, 0xea / 255.f, 0xec / 255.f, 0xfa / 255.f, 1);  // the gap colour
+        CGContextFillRect(c, part);
+        int c0 = std::max(0, (int)((part.origin.x - x0) / px) - 1), c1 = std::min(239, (int)((CGRectGetMaxX(part) - x0) / px) + 1);
+        int r0 = std::max(0, (int)((part.origin.y - y0) / py) - 1), r1 = std::min(63, (int)((CGRectGetMaxY(part) - y0) / py) + 1);
+        for (int pass = 0; pass < 2; pass++) {  // unlit dots, then lit ones: two fills, not one a dot
+            for (int row = r0; row <= r1; row++)
+                for (int col = c0; col <= c1; col++) {
+                    bool background = lcd_shown[row * 30 + (col >> 3)] & (0x80 >> (col & 7));
+                    if (background != (pass == 0)) continue;
+                    CGContextAddRect(c, CGRectMake(x0 + col * px, y0 + row * py, px * dot, py * dot));
+                }
+            if (pass == 0) CGContextSetRGBFillColor(c, 0xdc / 255.f, 0xdf / 255.f, 0xf4 / 255.f, 1);
+            else CGContextSetRGBFillColor(c, 0x48 / 255.f, 0x46 / 255.f, 0xc0 / 255.f, 1);
+            CGContextFillPath(c);
+        }
+    }
+
+    // The magnifier's static art: the whole panel drawn once from the vectors at the magnifier's
+    // zoom, then only copied. Redrawing the art's many layers of gradient bands at every frame
+    // stalled the magnifier. About 40 MB at 2x on a Retina screen; made again when the zoom, the
+    // panel size or the screen changes, and freed when the magnifier is turned off.
+    CGLayerRef zoom_layer = nullptr;
+    float zoom_layer_z = 0, zoom_layer_bk = 0;
+    int zoom_layer_w = 0, zoom_layer_h = 0;
+
+    void forget_zoom_layer() {
+        if (zoom_layer) CGLayerRelease(zoom_layer);
+        zoom_layer = nullptr;
+    }
+
+    CGLayerRef zoomed_art(CGContextRef view, float z, float bk) {
+        if (zoom_layer && z == zoom_layer_z && bk == zoom_layer_bk && width == zoom_layer_w && height == zoom_layer_h) return zoom_layer;
+        forget_zoom_layer();
+        if (width < 8 || height < 8) return nullptr;
+        zoom_layer = CGLayerCreateWithContext(view, CGSizeMake(width * z, height * z), nullptr);
+        if (!zoom_layer) return nullptr;
+        CGContextRef c = CGLayerGetContext(zoom_layer);
+        CGContextTranslateCTM(c, 0, height * z);  // y down, as the panel
+        CGContextScaleCTM(c, 1, -1);
+        CGContextScaleCTM(c, z, z);
+        draw_static_vector(c, CGRectMake(0, 0, width, height));
+        zoom_layer_z = z; zoom_layer_bk = bk; zoom_layer_w = width; zoom_layer_h = height;
+        return zoom_layer;
+    }
+
+    // Where the control being turned is now, in view units: the magnifier follows it while it moves.
+    bool drag_center(float& x, float& y) const {
+        float s = sx();
+        if (drag_pot >= 0) {
+            const PanelPot& p = panel_pots[drag_pot];
+            float value = pot_value[drag_pot] / 255.f;
+            x = left() + p.x * s;
+            y = p.y * s;
+            if (p.slider && moving[drag_pot].found) y = ((moving[drag_pot].by0 + moving[drag_pot].by1) / 2 - value * moving[drag_pot].travel) * art_scale();
+            else if (p.slider) y = (p.y + 44 - value * 88) * s;
+            return true;
+        }
+        if (drag_dial) { x = left() + panel_dial_x * s; y = panel_dial_y * s; return true; }
+        return false;
     }
 
     void set_pot(int i, int value) {
@@ -714,16 +929,207 @@ int PanelView::output_gain_db() {
 }
 float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
 
+// ---------------------------------------------------------------- the LCD in a window of its own
+
+// The 240 x 64 LCD drawn as dots, as large as its window, the unit's backlight and dot colours.
+@interface OB12_LCD_CLASS : NSView
+- (instancetype)initWithMachine:(ob12mac::MachineRef)machine;
+@property double contentAspect;  // the window's content, width over height: snapped back to it after a resize
+@end
+
+// In Logic the editor runs in a hosting process where a view's drawing is only recorded, and
+// Core Animation replays it later on the GPU, on one serial queue. The panel's thousands of
+// curves piled up there faster than they were replayed when the dial was turned fast, and the
+// editor showed an image seconds, then minutes, old: frozen until reopened. So the views draw on
+// the main thread into a bitmap of their own, and hand the system only the changed piece of it,
+// a single image: cheap to replay, and a slow frame only delays the next one.
+struct Canvas {
+    CGContextRef bitmap = nullptr;
+    size_t pw = 0, ph = 0;
+    ~Canvas() { if (bitmap) CGContextRelease(bitmap); }
+
+    void paint(NSView* view, NSRect dirty, void (^draw)(CGRect dirty)) {
+        CGContextRef out = [NSGraphicsContext currentContext].CGContext;
+        NSRect b = view.bounds;
+        if (!out || b.size.width < 1 || b.size.height < 1) return;
+        float bk = view.window ? (float)view.window.backingScaleFactor : 2.f;
+        size_t w = (size_t)ceil(b.size.width * bk), h = (size_t)ceil(b.size.height * bk);
+        if (!bitmap || w != pw || h != ph) {
+            if (bitmap) CGContextRelease(bitmap);
+            CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+            bitmap = CGBitmapContextCreate(nullptr, w, h, 8, 0, space, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+            CGColorSpaceRelease(space);
+            if (!bitmap) return;
+            pw = w; ph = h;
+            dirty = b;  // a new bitmap: all of it
+        }
+        // The dirty part on whole pixels: drawn, then copied, exactly.
+        long x0 = std::max(0L, (long)floor(NSMinX(dirty) * bk)), y0 = std::max(0L, (long)floor(NSMinY(dirty) * bk));
+        long x1 = std::min((long)w, (long)ceil(NSMaxX(dirty) * bk)), y1 = std::min((long)h, (long)ceil(NSMaxY(dirty) * bk));
+        if (x1 <= x0 || y1 <= y0) return;
+        CGRect part = CGRectMake(x0 / bk, y0 / bk, (x1 - x0) / bk, (y1 - y0) / bk);
+
+        CGContextSaveGState(bitmap);
+        CGContextScaleCTM(bitmap, bk, bk);
+        CGContextTranslateCTM(bitmap, 0, b.size.height);  // flipped, as the views: row 0 on top
+        CGContextScaleCTM(bitmap, 1, -1);
+        CGContextClipToRect(bitmap, part);
+        [NSGraphicsContext saveGraphicsState];
+        NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:bitmap flipped:YES];
+        draw(part);
+        [NSGraphicsContext restoreGraphicsState];
+        CGContextRestoreGState(bitmap);
+
+        size_t cw = (size_t)(x1 - x0), ch = (size_t)(y1 - y0), stride = CGBitmapContextGetBytesPerRow(bitmap);
+        const uint8_t* src = (const uint8_t*)CGBitmapContextGetData(bitmap);
+        CFMutableDataRef bytes = CFDataCreateMutable(nullptr, (CFIndex)(cw * ch * 4));
+        CFDataSetLength(bytes, (CFIndex)(cw * ch * 4));
+        uint8_t* dst = CFDataGetMutableBytePtr(bytes);
+        for (size_t row = 0; row < ch; row++) memcpy(dst + row * cw * 4, src + (y0 + row) * stride + x0 * 4, cw * 4);
+        CGDataProviderRef provider = CGDataProviderCreateWithCFData(bytes);
+        CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGImageRef piece = CGImageCreate(cw, ch, 8, 32, cw * 4, space, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, provider, nullptr, false, kCGRenderingIntentDefault);
+        CGColorSpaceRelease(space);
+        CGDataProviderRelease(provider);
+        CFRelease(bytes);
+        if (!piece) return;
+        CGContextSaveGState(out);
+        CGContextSetInterpolationQuality(out, kCGInterpolationNone);
+        CGContextTranslateCTM(out, 0, CGRectGetMaxY(part));  // the view is flipped, the image is not
+        CGContextScaleCTM(out, 1, -1);
+        CGContextDrawImage(out, CGRectMake(part.origin.x, 0, part.size.width, part.size.height), piece);
+        CGContextRestoreGState(out);
+        CGImageRelease(piece);
+    }
+};
+
+@implementation OB12_LCD_CLASS {
+    Canvas _canvas;
+    ob12mac::MachineRef _machine;
+    uint8_t _bits[30 * 64];
+    bool _valid;
+    NSTimer* _timer;
+    NSSize _before;  // the size when the live resize began
+}
+
+- (instancetype)initWithMachine:(ob12mac::MachineRef)machine {
+    self = [super initWithFrame:NSMakeRect(0, 0, 100, 30)];
+    if (self) {
+        _machine = machine;
+        memset(_bits, 0, sizeof _bits);
+        _valid = false;
+        __weak OB12_LCD_CLASS* weak = self;
+        _timer = [NSTimer timerWithTimeInterval:1.0 / 30 repeats:YES block:^(NSTimer*) { [weak poll]; }];
+        [[NSRunLoop mainRunLoop] addTimer:_timer forMode:NSRunLoopCommonModes];
+    }
+    return self;
+}
+
+- (void)dealloc { [_timer invalidate]; }
+- (void)stop { [_timer invalidate]; _timer = nil; }
+
+// Redrawn only when the LCD changes: drawing its 15360 dots 30 times a second for nothing took
+// time from the panel and its magnifier.
+- (void)poll {
+    uint8_t now[30 * 64];
+    if (!_machine.engine || !_machine.engine->lcd(now)) return;
+    if (_valid && !memcmp(now, _bits, sizeof now)) return;
+    memcpy(_bits, now, sizeof now);
+    _valid = true;
+    [self setNeedsDisplay:YES];
+}
+
+// macOS does not always apply a window's aspect constraint (a plug-in in Logic's hosting process),
+// so the window is brought back to the LCD's proportions when the user lets go: the side pulled
+// most leads, the top edge stays put. While pulling, drawRect keeps the LCD itself undistorted.
+- (void)viewWillStartLiveResize { [super viewWillStartLiveResize]; _before = self.bounds.size; }
+- (void)viewDidEndLiveResize {
+    [super viewDidEndLiveResize];
+    [self snapToAspect];
+}
+- (void)snapToAspect {
+    NSWindow* win = self.window;
+    double a = self.contentAspect;
+    if (!win || a <= 0) return;
+    NSRect inner = [win contentRectForFrameRect:win.frame];
+    if (fabs(inner.size.width / inner.size.height - a) < 0.005) return;
+    double dw = fabs(inner.size.width - _before.width), dh = fabs(inner.size.height - _before.height) * a;
+    double top = NSMaxY(inner);
+    if (dw >= dh) inner.size.height = inner.size.width / a;
+    else inner.size.width = inner.size.height * a;
+    inner.origin.y = top - inner.size.height;
+    [win setFrame:[win frameRectForContentRect:inner] display:YES animate:NO];
+}
+- (BOOL)isFlipped { return YES; }
+- (void)drawRect:(NSRect)dirty {
+    __weak __typeof(self) me = self;
+    _canvas.paint(self, dirty, ^(CGRect part) { [me paintDirty:part]; });
+}
+- (BOOL)isOpaque { return YES; }
+
+- (void)paintDirty:(NSRect)dirty {
+    CGContextRef c = [NSGraphicsContext currentContext].CGContext;
+    NSRect b = self.bounds;
+    CGContextSetRGBFillColor(c, 0.05f, 0.05f, 0.06f, 1);  // the bezel
+    CGContextFillRect(c, b);
+    // The LCD at its own proportions, centred: never stretched, whatever the window's shape.
+    const float lcd_aspect = (panel_lcd_x1 - panel_lcd_x0) / (panel_lcd_y1 - panel_lcd_y0);
+    float m = (float)std::min(b.size.width, b.size.height) * 0.07f;
+    CGRect room = CGRectInset(b, m, m);
+    float w = (float)room.size.width, h = (float)room.size.height;
+    if (w / h > lcd_aspect) w = h * lcd_aspect; else h = w / lcd_aspect;
+    CGRect lcd = CGRectMake(room.origin.x + (room.size.width - w) / 2, room.origin.y + (room.size.height - h) / 2, w, h);
+    CGContextSetRGBFillColor(c, 0xea / 255.f, 0xec / 255.f, 0xfa / 255.f, 1);  // the gap between dots
+    CGContextFillRect(c, lcd);
+    if (!_valid) return;
+    const float px = (float)lcd.size.width / 240, py = (float)lcd.size.height / 64, dot = 0.86f;
+    for (int pass = 0; pass < 2; pass++) {  // unlit dots, then lit ones
+        for (int row = 0; row < 64; row++)
+            for (int col = 0; col < 240; col++) {
+                bool background = _bits[row * 30 + (col >> 3)] & (0x80 >> (col & 7));
+                if (background != (pass == 0)) continue;
+                CGContextAddRect(c, CGRectMake(lcd.origin.x + col * px, lcd.origin.y + row * py, px * dot, py * dot));
+            }
+        if (pass == 0) CGContextSetRGBFillColor(c, 0xdc / 255.f, 0xdf / 255.f, 0xf4 / 255.f, 1);
+        else CGContextSetRGBFillColor(c, 0x48 / 255.f, 0x46 / 255.f, 0xc0 / 255.f, 1);
+        CGContextFillPath(c);
+    }
+}
+
+@end
+
 // ---------------------------------------------------------------- the NSView
 
-@interface OB12_PANEL_CLASS : NSView
+@interface OB12_PANEL_CLASS : NSView <NSWindowDelegate>
 - (instancetype)initWithMachine:(ob12mac::MachineRef)machine;
 @end
 
 @implementation OB12_PANEL_CLASS {
+    Canvas _canvas;
     ob12mac::MachineRef _machine;
     std::unique_ptr<PanelArt> _art;
     NSTimer* _timer;
+    LoupeSettings _loupe;
+    NSPoint _mouse;          // the pointer, view units
+    BOOL _mouseInside;
+    NSButton* _loupeButton;
+    NSTrackingArea* _tracking;
+    NSButton* _lcdButton;
+    NSSegmentedControl* _zoomPick;  // the magnifier's zoom and size, in the strip: no menu needed
+    NSSegmentedControl* _sizePick;
+    NSPanel* _lcdWindow;
+    BOOL _lcdWanted;      // the user's choice, kept: the window comes back with the editor
+    BOOL _closingForGood; // the editor goes away: closing the window is not the user turning it off
+    id _activationObserver;
+    BOOL _dirty;          // something changed: the next frame redraws the whole panel
+    long _tick;
+    CGRect _lastLoupe;    // where the magnifier is drawn, with its shadow (empty: nowhere)
+    CGPoint _loupeAt;     // its centre, decided by the clock
+    CGRect _partDirty;    // controls that moved since the last frame (null: none)
+    float _ppm;           // points per millimetre of the screen below, kept
+    NSScreen* _ppmScreen;
+    pid_t _hostPid;       // the app that was in front when the editor opened: the host (Logic)
+    double _lcdAspect;    // the LCD window's content, width over height
 }
 
 - (instancetype)initWithMachine:(ob12mac::MachineRef)machine {
@@ -735,24 +1141,107 @@ float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
     art->build_paths();
     int w = load_width();
     int h = (int)lroundf(w / art->aspect());
-    self = [super initWithFrame:NSMakeRect(0, 0, w, h)];
+    self = [super initWithFrame:NSMakeRect(0, 0, w, h + strip_height)];
     if (self) {
         _machine = machine;
         _art = std::move(art);
         _art->width = w;
         _art->height = h;
+        _loupe = load_loupe();
+        NSImage* glass = [NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:@"Magnifier"];
+        _loupeButton = [NSButton buttonWithTitle:@"Magnifier" image:glass target:self action:@selector(toggleLoupe:)];
+        [_loupeButton setButtonType:NSButtonTypePushOnPushOff];
+        _loupeButton.bezelStyle = NSBezelStyleRounded;
+        _loupeButton.controlSize = NSControlSizeSmall;
+        _loupeButton.font = [NSFont systemFontOfSize:[NSFont systemFontSizeForControlSize:NSControlSizeSmall]];
+        _loupeButton.imagePosition = NSImageLeading;
+        _loupeButton.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+        _loupeButton.toolTip = @"Magnifier: hover over the panel to enlarge it. Right click for zoom and size.";
+        _loupeButton.state = _loupe.on ? NSControlStateValueOn : NSControlStateValueOff;
+        [_loupeButton sizeToFit];
+        [self addSubview:_loupeButton];
+        NSImage* screen = [NSImage imageWithSystemSymbolName:@"display" accessibilityDescription:@"LCD window"];
+        _lcdButton = [NSButton buttonWithTitle:@"LCD ×2" image:screen target:self action:@selector(toggleLCD:)];
+        [_lcdButton setButtonType:NSButtonTypePushOnPushOff];
+        _lcdButton.bezelStyle = NSBezelStyleRounded;
+        _lcdButton.controlSize = NSControlSizeSmall;
+        _lcdButton.font = _loupeButton.font;
+        _lcdButton.imagePosition = NSImageLeading;
+        _lcdButton.appearance = _loupeButton.appearance;
+        _lcdButton.toolTip = @"The LCD in a window of its own, twice its size on the panel. Resize the window to taste.";
+        _lcdWanted = load_lcd_window();
+        _lcdButton.state = _lcdWanted ? NSControlStateValueOn : NSControlStateValueOff;
+        [_lcdButton sizeToFit];
+        [self addSubview:_lcdButton];
+        _zoomPick = [NSSegmentedControl segmentedControlWithLabels:@[@"×1.5", @"×2", @"×2.5"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(zoomPicked:)];
+        _sizePick = [NSSegmentedControl segmentedControlWithLabels:@[@"3 cm", @"3.5 cm", @"4 cm", @"5 cm"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(sizePicked:)];
+        for (NSSegmentedControl* pick in @[_zoomPick, _sizePick]) {
+            pick.controlSize = NSControlSizeSmall;
+            pick.font = _loupeButton.font;
+            pick.appearance = _loupeButton.appearance;
+            [self addSubview:pick];
+        }
+        _zoomPick.toolTip = @"Magnifier zoom";
+        _sizePick.toolTip = @"Magnifier diameter on the screen";
+        [self showLoupePicks];
+        [self placeStrip];
+        _partDirty = CGRectNull;
         __weak OB12_PANEL_CLASS* weak = self;
-        _timer = [NSTimer timerWithTimeInterval:1.0 / 30 repeats:YES block:^(NSTimer*) { [weak setNeedsDisplay:YES]; }];
+        _timer = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer*) { [weak clockTick]; }];
         [[NSRunLoop mainRunLoop] addTimer:_timer forMode:NSRunLoopCommonModes];
     }
     return self;
 }
 
+// The only place the whole panel is redrawn: at most 60 times a second while something moves,
+// 30 otherwise (the LCD and the lamps). Mouse, wheel and dial events only mark the panel dirty;
+// redrawing at their own rate (up to 120 a second) piled up and froze the editor.
+- (void)clockTick {
+    bool lcd = _art->poll_lcd();
+    CGRect lamps = _art->poll_leds();
+    bool leds = !CGRectIsNull(lamps);
+    CGRect area = CGRectZero;
+    if (_loupe.on) {
+        NSPoint at = self.window ? [self convertPoint:self.window.mouseLocationOutsideOfEventStream fromView:nil] : _mouse;
+        BOOL inside = self.window && self.window.isVisible && NSPointInRect(at, NSMakeRect(0, 0, _art->width, _art->height));
+        float cx = (float)at.x, cy = (float)at.y;
+        bool dragging = _art->drag_center(cx, cy);
+        if (dragging || inside) {
+            const float r = std::max(20.f, _loupe.mm * [self pointsPerMillimetre] / 2);
+            area = CGRectMake(cx - r - 16, cy - r - 16, 2 * r + 32, 2 * r + 32);
+            _loupeAt = CGPointMake(cx, cy);
+        }
+    }
+    // Only what changed is redrawn: the whole panel when a control or a lamp did, the LCD when it
+    // did, the magnifier where it was and where it goes. A full redraw at every pointer move kept
+    // the main thread busy and Logic stalled.
+    if (_dirty) [self setNeedsDisplay:YES];
+    else {
+        bool part = !CGRectIsNull(_partDirty) && !CGRectIsEmpty(_partDirty);
+        if (part) [self setNeedsDisplayInRect:_partDirty];
+        if (leds) { [self setNeedsDisplayInRect:lamps]; part = true; }
+        if (lcd) [self setNeedsDisplayInRect:_art->lcd_rect()];
+        if (!CGRectEqualToRect(area, _lastLoupe) || lcd || part) {
+            if (!CGRectIsEmpty(_lastLoupe)) [self setNeedsDisplayInRect:_lastLoupe];
+            if (!CGRectIsEmpty(area)) [self setNeedsDisplayInRect:area];
+        }
+    }
+    _lastLoupe = area;
+    _dirty = NO;
+    _partDirty = CGRectNull;
+}
+
 - (void)dealloc {
     [_timer invalidate];
+    [self forgetActivation];
+    if (_lcdWindow) { _lcdWindow.delegate = nil; [(OB12_LCD_CLASS*)_lcdWindow.contentView stop]; [_lcdWindow close]; }
 }
 
 - (BOOL)isFlipped { return YES; }
+- (void)drawRect:(NSRect)dirty {
+    __weak __typeof(self) me = self;
+    _canvas.paint(self, dirty, ^(CGRect part) { [me paintDirty:part]; });
+}
 - (BOOL)isOpaque { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)event { return YES; }
 
@@ -760,8 +1249,275 @@ float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
     [super setFrameSize:size];
     if (!_art) return;
     _art->width = (int)size.width;
-    _art->height = (int)size.height;
+    _art->height = std::max(8, (int)size.height - strip_height);
     _art->art_backing = 0;  // the art is drawn again at the new size
+    [self placeStrip];
+}
+
+- (void)placeStrip {
+    if (!_loupeButton || !_art) return;
+    NSSize b = _loupeButton.frame.size;
+    [_loupeButton setFrameOrigin:NSMakePoint(10, _art->height + (strip_height - b.height) / 2)];
+    if (_lcdButton) {
+        NSSize l = _lcdButton.frame.size;
+        [_lcdButton setFrameOrigin:NSMakePoint(NSMaxX(_loupeButton.frame) + 8, _art->height + (strip_height - l.height) / 2)];
+    }
+    NSView* last = _lcdButton ?: _loupeButton;
+    for (NSSegmentedControl* pick in @[_zoomPick ?: (id)NSNull.null, _sizePick ?: (id)NSNull.null]) {
+        if (![pick isKindOfClass:NSSegmentedControl.class]) continue;
+        [pick sizeToFit];
+        NSSize p = pick.frame.size;
+        [pick setFrameOrigin:NSMakePoint(NSMaxX(last.frame) + 12, _art->height + (strip_height - p.height) / 2)];
+        last = pick;
+    }
+}
+
+// ---- the LCD window
+
+- (void)openLCD {
+    if (_lcdWindow) return;
+    float s = _art->sx();
+    float w = std::max(240.f, (panel_lcd_x1 - panel_lcd_x0) * s * 2), h = w * (panel_lcd_y1 - panel_lcd_y0) / (panel_lcd_x1 - panel_lcd_x0);
+    float m = std::min(w, h) * 0.07f / 0.86f;  // room for the bezel the view draws
+    NSSize content = NSMakeSize(w + 2 * m, h + 2 * m);
+    NSPanel* win = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, content.width, content.height)
+        styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow
+        backing:NSBackingStoreBuffered defer:NO];
+    win.title = @"OB-12 LCD";
+    win.floatingPanel = YES;
+    // In front of everything while the host is the active app (Logic's plug-in windows float too,
+    // so the plain floating level let a click on the editor bring the editor over the LCD), hidden
+    // while another app is in front: see updateLCDVisibility.
+    win.level = NSStatusWindowLevel;
+    win.collectionBehavior = NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorIgnoresCycle;
+    win.hidesOnDeactivate = NO;
+    win.releasedWhenClosed = NO;
+    win.becomesKeyOnlyIfNeeded = YES;
+    _lcdAspect = content.width / content.height;
+    win.contentMinSize = NSMakeSize(content.width / 3, content.height / 3);
+    OB12_LCD_CLASS* lcdView = [[OB12_LCD_CLASS alloc] initWithMachine:_machine];
+    lcdView.contentAspect = content.width / content.height;
+    win.contentView = lcdView;
+    win.contentAspectRatio = content;  // where macOS honours it, the resize is constrained live
+    win.delegate = self;
+    if (![win setFrameUsingName:@"OB12 LCD"]) {  // the first time: just above the editor
+        NSRect host = self.window ? self.window.frame : NSMakeRect(200, 200, 0, 0);
+        NSRect frame = win.frame;
+        frame.origin.x = NSMidX(host) - frame.size.width / 2;
+        frame.origin.y = NSMaxY(host) + 12;
+        NSRect visible = (self.window.screen ?: NSScreen.mainScreen).visibleFrame;
+        if (NSMaxY(frame) > NSMaxY(visible)) frame.origin.y = NSMaxY(visible) - frame.size.height;
+        [win setFrame:frame display:NO];
+    }
+    win.frameAutosaveName = @"OB12 LCD";
+    {   // a frame saved earlier keeps its width and gets the LCD's proportions again
+        NSRect inner = [win contentRectForFrameRect:win.frame];
+        double h = inner.size.width / _lcdAspect;
+        if (fabs(inner.size.height - h) > 1) {
+            inner.origin.y += inner.size.height - h;  // the top edge stays where it was
+            inner.size.height = h;
+            [win setFrame:[win frameRectForContentRect:inner] display:NO];
+        }
+    }
+    _lcdWindow = win;
+    _lcdButton.state = NSControlStateValueOn;
+    __weak OB12_PANEL_CLASS* weak = self;
+    _activationObserver = [NSWorkspace.sharedWorkspace.notificationCenter addObserverForName:NSWorkspaceDidActivateApplicationNotification
+        object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification*) { [weak updateLCDVisibility]; }];
+    [self updateLCDVisibility];
+}
+
+// Shown only while the host (Logic) is the active app; hidden while another app is in front.
+- (void)updateLCDVisibility {
+    if (!_lcdWindow) return;
+    NSRunningApplication* front = NSWorkspace.sharedWorkspace.frontmostApplication;
+    pid_t pid = front ? front.processIdentifier : 0;
+    // Logic may run the plug-in in a hosting process of its own: the host is then not this process
+    // but the app that was in front when the editor opened.
+    BOOL host = !front || pid == getpid() || (_hostPid && pid == _hostPid) || !_hostPid;
+    if (host) [_lcdWindow orderFrontRegardless];
+    else [_lcdWindow orderOut:nil];
+}
+
+- (void)forgetActivation {
+    if (_activationObserver) [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:_activationObserver];
+    _activationObserver = nil;
+}
+
+- (void)closeLCDForGood:(BOOL)forGood {
+    if (!_lcdWindow) return;
+    _closingForGood = forGood;
+    [(OB12_LCD_CLASS*)_lcdWindow.contentView stop];
+    [_lcdWindow close];
+    _closingForGood = NO;
+}
+
+// Resizing keeps the LCD's proportions: the side the user pulls most leads, the other follows.
+- (NSSize)windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize {
+    if (sender != _lcdWindow || _lcdAspect <= 0) return frameSize;
+    NSSize now = [sender contentRectForFrameRect:sender.frame].size;
+    NSRect want = [sender contentRectForFrameRect:NSMakeRect(0, 0, frameSize.width, frameSize.height)];
+    if (fabs(want.size.width - now.width) >= fabs(want.size.height - now.height) * _lcdAspect)
+        want.size.height = want.size.width / _lcdAspect;
+    else
+        want.size.width = want.size.height * _lcdAspect;
+    NSSize least = sender.contentMinSize;
+    if (want.size.width < least.width) { want.size.width = least.width; want.size.height = least.width / _lcdAspect; }
+    return [sender frameRectForContentRect:want].size;
+}
+
+- (void)windowWillClose:(NSNotification*)note {
+    if (note.object != _lcdWindow) return;
+    [self forgetActivation];
+    [(OB12_LCD_CLASS*)_lcdWindow.contentView stop];
+    _lcdWindow.delegate = nil;
+    NSPanel* closing = _lcdWindow;  // let it finish closing before the last reference goes
+    dispatch_async(dispatch_get_main_queue(), ^{ (void)closing; });
+    _lcdWindow = nil;
+    if (!_closingForGood) {  // the user closed it
+        _lcdWanted = NO;
+        save_lcd_window(false);
+        _lcdButton.state = NSControlStateValueOff;
+    }
+}
+
+- (void)toggleLCD:(id)sender {
+    if (_lcdWindow) {
+        [self closeLCDForGood:NO];
+    } else {
+        _lcdWanted = YES;
+        save_lcd_window(true);
+        [self openLCD];
+    }
+}
+
+// The window lives with the editor: it goes when the editor closes and comes back with it.
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    if (self.window) {  // the editor opens: the app in front now is the host
+        NSRunningApplication* front = NSWorkspace.sharedWorkspace.frontmostApplication;
+        if (front) _hostPid = front.processIdentifier;
+    }
+    if (!self.window) [self closeLCDForGood:YES];
+    else if (_lcdWanted && !_lcdWindow) [self openLCD];
+}
+
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (_tracking) [self removeTrackingArea:_tracking];
+    _tracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+        owner:self userInfo:nil];
+    [self addTrackingArea:_tracking];
+}
+
+// A move redraws only where the magnifier was and where it goes, not the whole panel: the pointer
+// can send 120 moves a second, and a full redraw each time stalled the magnifier.
+- (void)loupeMovedTo:(NSPoint)p {
+    _mouse = p;
+    // Nothing to do here: the clock reads the pointer at each frame and moves the magnifier.
+}
+- (void)mouseEntered:(NSEvent*)event { _mouseInside = YES; [self loupeMovedTo:[self at:event]]; }
+- (void)mouseExited:(NSEvent*)event { _mouseInside = NO; }
+- (void)mouseMoved:(NSEvent*)event { _mouseInside = YES; [self loupeMovedTo:[self at:event]]; }
+
+// Points per millimetre on the screen that shows the panel, from the display's physical size.
+- (float)pointsPerMillimetre {
+    NSScreen* screen = self.window.screen ?: NSScreen.mainScreen;
+    if (_ppm > 0 && screen == _ppmScreen) return _ppm;
+    _ppmScreen = screen;
+    _ppm = [self measurePointsPerMillimetre:screen];
+    return _ppm;
+}
+
+- (float)measurePointsPerMillimetre:(NSScreen*)screen {
+    NSNumber* number = screen.deviceDescription[@"NSScreenNumber"];
+    if (number) {
+        CGSize mm = CGDisplayScreenSize(number.unsignedIntValue);
+        if (mm.width > 50) return (float)(screen.frame.size.width / mm.width);
+    }
+    return 72.f / 25.4f;
+}
+
+- (void)toggleLoupe:(id)sender {
+    _loupe.on = !_loupe.on;
+    if (!_loupe.on) _art->forget_zoom_layer();
+    _loupeButton.state = _loupe.on ? NSControlStateValueOn : NSControlStateValueOff;
+    [self showLoupePicks];
+    save_loupe(_loupe);
+    [self setNeedsDisplay:YES];
+}
+// The zoom and the size are picked in the strip, not in a context menu: in Logic's hosting
+// process a pop-up menu left the editor deaf to the scroll wheel until it was reopened.
+- (void)showLoupePicks {
+    if (!_zoomPick || !_sizePick) return;
+    int z = 1, d = 1;
+    for (int i = 0; i < 3; i++) if (std::abs(_loupe.zoom - loupe_zooms[i]) < 0.05f) z = i;
+    for (int i = 0; i < 4; i++) if (std::abs(_loupe.mm - loupe_sizes[i]) < 1) d = i;
+    _zoomPick.selectedSegment = z;
+    _sizePick.selectedSegment = d;
+    _zoomPick.enabled = _sizePick.enabled = _loupe.on;
+    [self placeStrip];
+}
+- (void)zoomPicked:(NSSegmentedControl*)pick { _loupe.zoom = loupe_zooms[std::max(0, std::min(2, (int)pick.selectedSegment))]; [self loupePicked]; }
+- (void)sizePicked:(NSSegmentedControl*)pick { _loupe.mm = loupe_sizes[std::max(0, std::min(3, (int)pick.selectedSegment))]; [self loupePicked]; }
+- (void)loupePicked {
+    save_loupe(_loupe);
+    [self.window makeFirstResponder:self];
+    [self setNeedsDisplay:YES];
+}
+
+// The magnifier: a disc of the panel drawn again, enlarged and sharp, where the pointer is, or on
+// the control being turned while it is turned.
+- (void)drawLoupe:(CGContextRef)c backing:(float)backing dirty:(CGRect)dirty {
+    // The pointer is read here, at every frame, not taken from mouse-moved events: in Logic those
+    // stop coming after a context menu (the plug-in runs in a hosting process), and the magnifier
+    // stayed frozen where the menu had been opened.
+    if (CGRectIsEmpty(_lastLoupe) || !CGRectIntersectsRect(_lastLoupe, dirty)) return;
+    float cx = (float)_loupeAt.x, cy = (float)_loupeAt.y;
+    const float r = _lastLoupe.size.width / 2 - 16, z = _loupe.zoom;
+    CGRect disc = CGRectMake(cx - r, cy - r, 2 * r, 2 * r);
+    CGRect panel = CGRectMake(0, 0, _art->width, _art->height);
+
+    CGContextSaveGState(c);
+    CGContextClipToRect(c, panel);
+    CGColorRef shade = CGColorCreateGenericGray(0, 0.7);
+    CGContextSetShadowWithColor(c, CGSizeMake(0, 4), 12, shade);
+    CGColorRelease(shade);
+    CGContextSetRGBFillColor(c, 0.13f, 0.32f, 0.69f, 1);
+    CGContextFillEllipseInRect(c, disc);
+    CGContextRestoreGState(c);
+
+    CGContextSaveGState(c);
+    CGContextClipToRect(c, panel);
+    CGContextAddEllipseInRect(c, disc);
+    CGContextClip(c);
+    // A panel point P shows at z * P - offset, so the pointer's point stays put; the offset is kept
+    // on whole device pixels so the copied art stays sharp.
+    float ox = roundf(cx * (z - 1) * backing) / backing, oy = roundf(cy * (z - 1) * backing) / backing;
+    if (CGLayerRef zoomed = _art->zoomed_art(c, z, backing)) {
+        CGContextSaveGState(c);
+        CGContextTranslateCTM(c, -ox, -oy);
+        CGContextTranslateCTM(c, 0, _art->height * z);
+        CGContextScaleCTM(c, 1, -1);
+        CGContextDrawLayerAtPoint(c, CGPointZero, zoomed);
+        CGContextRestoreGState(c);
+    }
+    CGContextTranslateCTM(c, -ox, -oy);
+    CGContextScaleCTM(c, z, z);
+    CGRect seen = CGRectMake((CGRectGetMinX(disc) + ox) / z, (CGRectGetMinY(disc) + oy) / z, 2 * r / z, 2 * r / z);
+    _art->draw_dynamic(c, backing * z, true, seen);
+    CGContextRestoreGState(c);
+
+    CGContextSaveGState(c);
+    CGContextClipToRect(c, panel);
+    CGContextSetRGBStrokeColor(c, 0.05f, 0.05f, 0.06f, 0.9f);
+    CGContextSetLineWidth(c, 3);
+    CGContextStrokeEllipseInRect(c, disc);
+    CGContextSetRGBStrokeColor(c, 0.93f, 0.90f, 0.78f, 0.9f);
+    CGContextSetLineWidth(c, 1.2f);
+    CGContextStrokeEllipseInRect(c, CGRectInset(disc, 2, 2));
+    CGContextRestoreGState(c);
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -771,10 +1527,20 @@ float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
     _art->lcd_valid = false;
 }
 
-- (void)drawRect:(NSRect)dirty {
+- (void)paintDirty:(NSRect)dirty {
     CGContextRef c = [NSGraphicsContext currentContext].CGContext;
     float backing = self.window ? (float)self.window.backingScaleFactor : 2.f;
-    _art->paint(c, backing);
+    _art->paint(c, backing, dirty);
+    if (_loupe.on) [self drawLoupe:c backing:backing dirty:dirty];
+    // The bar under the panel, with the magnifier's button and a hint.
+    CGRect bar = CGRectMake(0, _art->height, _art->width, self.bounds.size.height - _art->height);
+    CGContextSetRGBFillColor(c, 0.07f, 0.07f, 0.08f, 1);
+    CGContextFillRect(c, bar);
+    NSString* hint = _loupe.on ? @"Hover over the panel to enlarge it; it stays on a control while you turn it."
+                               : @"Small print? Turn the magnifier on.";
+    NSDictionary* attrs = @{NSFontAttributeName: [NSFont systemFontOfSize:11], NSForegroundColorAttributeName: [NSColor colorWithWhite:0.62 alpha:1]};
+    NSSize size = [hint sizeWithAttributes:attrs];
+    [hint drawAtPoint:NSMakePoint(NSMaxX((_sizePick ?: _lcdButton ?: _loupeButton).frame) + 12, _art->height + (strip_height - size.height) / 2) withAttributes:attrs];
 }
 
 - (NSPoint)at:(NSEvent*)event { return [self convertPoint:event.locationInWindow fromView:nil]; }
@@ -782,17 +1548,24 @@ float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
 - (void)mouseDown:(NSEvent*)event {
     if (event.modifierFlags & NSEventModifierFlagControl) { [self rightMouseDown:event]; return; }
     NSPoint p = [self at:event];
+    if (p.y >= _art->height) return;  // the bar under the panel
     _art->mouse_down(p.x, p.y);
-    [self setNeedsDisplay:YES];
+    _dirty = YES;
 }
 - (void)mouseDragged:(NSEvent*)event {
     NSPoint p = [self at:event];
+    _mouse = p;
+    CGRect before = _art->drag_rect();
     _art->mouse_move(p.x, p.y);
-    [self setNeedsDisplay:YES];
+    // Only the control being turned is redrawn while it turns, not the whole panel.
+    CGRect now = _art->drag_rect();
+    if (CGRectIsNull(now)) return;
+    _partDirty = CGRectUnion(CGRectUnion(_partDirty, before), now);
 }
 - (void)mouseUp:(NSEvent*)event {
+    _mouse = [self at:event];
     _art->mouse_up();
-    [self setNeedsDisplay:YES];
+    _dirty = YES;
 }
 
 - (void)scrollWheel:(NSEvent*)event {
@@ -807,7 +1580,7 @@ float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
     rest = 0;
     _machine.engine->turn(detents);
     _art->dial_angle += 15.f * detents;
-    [self setNeedsDisplay:YES];
+    _partDirty = CGRectUnion(_partDirty, _art->dial_rect());
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
@@ -837,6 +1610,9 @@ float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
         item.state = std::abs(_art->width - PanelView::base_width * percent / 100) < 4 ? NSControlStateValueOn : NSControlStateValueOff;
     }
     [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+    // Back from the menu: take the events again (in the hosting process they may stay with it).
+    [self.window makeFirstResponder:self];
+    [self updateTrackingAreas];
 }
 
 - (void)setGain:(NSMenuItem*)item { write_gain((int)item.tag); }
@@ -844,7 +1620,7 @@ float PanelView::output_gain() { return powf(10.f, output_gain_db() / 20.f); }
 - (void)setScale:(NSMenuItem*)item {
     int width = std::max(min_width, PanelView::base_width * (int)item.tag / 100);
     save_width(width);
-    [self setFrameSize:NSMakeSize(width, lroundf(width / _art->aspect()))];
+    [self setFrameSize:NSMakeSize(width, lroundf(width / _art->aspect()) + strip_height)];
     [self setNeedsDisplay:YES];
 }
 
