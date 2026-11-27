@@ -18,6 +18,7 @@
 #include <vector>
 #include "ob12_engine.h"
 #include "panel_controls.h"
+#include "panel_skins.h"
 #include "panel_view.h"
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -57,6 +58,7 @@ constexpr int shot_command = 1999;
 constexpr int syx_command = 1500;    // load a .syx or .mid into MIDI IN, as a sequencer would
 constexpr int factory_command = 1501;  // forget the stored memory
 constexpr int gain_command = 1600;     // plus 0-24: output gain in dB
+constexpr int skin_command = 1700;     // plus the index in panel_skins
 constexpr int dump_command = 1502;     // save what MIDI OUT sent as system exclusive (a bulk dump)   // hidden: save the panel to OB12_PANEL_SHOT as PNG
 constexpr int scale_percents[] = {50, 67, 75, 100, 125, 150, 200};
 
@@ -85,6 +87,30 @@ int read_gain() {
 void write_gain(int db) {
     gain_db = db;
     if (FILE* f = fopen(gain_file(true).c_str(), "w")) { fprintf(f, "%d\n", db); fclose(f); }
+}
+
+// The display and lamp colours the user chose: an index in panel_skins, kept as the gain is.
+std::atomic<int> skin_index{-1};  // -1: not read yet
+std::string skin_file(bool make_folder) {
+    const char* base = getenv("LOCALAPPDATA");
+    if (!base) return "";
+    std::string folder = std::string(base) + "\\OB12";
+    if (make_folder) CreateDirectoryA(folder.c_str(), nullptr);
+    return folder + "\\display_skin.txt";
+}
+int current_skin() {
+    int i = skin_index.load();
+    if (i < 0) {
+        i = 0;
+        if (FILE* f = fopen(skin_file(false).c_str(), "r")) { if (fscanf(f, "%d", &i) != 1) i = 0; fclose(f); }
+        if (i < 0 || i >= panel_skin_count) i = 0;
+        skin_index = i;
+    }
+    return i;
+}
+void write_skin(int i) {
+    skin_index = i;
+    if (FILE* f = fopen(skin_file(true).c_str(), "w")) { fprintf(f, "%d\n", i); fclose(f); }
 }
 const UINT_PTR frame_timer = 1;
 
@@ -610,6 +636,13 @@ struct PanelView::Impl {
         wchar_t gain_text[48];
         swprintf(gain_text, 48, L"Output gain (now %ls%d dB)", now_db ? L"+" : L"", now_db);
         AppendMenuW(menu, MF_POPUP, (UINT_PTR)gain, gain_text);
+        HMENU skins = CreatePopupMenu();
+        for (int i = 0; i < panel_skin_count; i++) {
+            wchar_t text[32];
+            swprintf(text, 32, L"%hs", panel_skins[i].name);
+            AppendMenuW(skins, MF_STRING | (i == current_skin() ? MF_CHECKED : 0), skin_command + i, text);
+        }
+        AppendMenuW(menu, MF_POPUP, (UINT_PTR)skins, L"Display and lamps");
         if (width_request) AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         if (width_request) for (int percent : scale_percents) {
             wchar_t text[16];
@@ -665,6 +698,7 @@ struct PanelView::Impl {
     std::vector<uint32_t> lcd_pixels;
     uint8_t lcd_shown[30 * 64] = {};
     int lcd_w = 0, lcd_h = 0;
+    int lcd_skin = 0;  // the colours the bitmap was made in
     bool lcd_valid = false;
 
     // Per device column (or row): which LCD cells it overlaps and by how much of a dot.
@@ -690,6 +724,8 @@ struct PanelView::Impl {
         bool fresh = engine.lcd(lcd_bits);
         if (!fresh && !lcd_valid) return;
         bool changed = fresh && memcmp(lcd_bits, lcd_shown, sizeof lcd_bits) != 0;
+        const PanelSkin& skin = panel_skins[current_skin()];
+        if (lcd_skin != current_skin()) { lcd_skin = current_skin(); lcd_valid = false; }  // chosen in any open panel
         if (!lcd || w != lcd_w || h != lcd_h) {
             release(lcd);
             if (FAILED(target->CreateBitmap(D2D1::SizeU(w, h), D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)), &lcd))) return;
@@ -703,8 +739,9 @@ struct PanelView::Impl {
             dot_cover(w, 240, fx, cx);
             dot_cover(h, 64, fy, cy);
             // A set bit is background. Gap, unlit dot and lit dot colours, R G B.
-            // The unit's blue-white backlight with blue-violet dots (Thor's photo of the SYSTEM READY page).
-            const float gap[3] = {0xea, 0xec, 0xfa}, off[3] = {0xdc, 0xdf, 0xf4}, on[3] = {0x48, 0x46, 0xc0};
+            // The unit's blue-white backlight with blue-violet dots (Thor's photo of the SYSTEM READY page)
+            // is panel_skins[0]; the menu offers others.
+            const float* gap = skin.gap; const float* off = skin.off; const float* on = skin.on;
             lcd_pixels.assign((size_t)w * h, 0);
             for (int py = 0; py < h; py++) for (int px = 0; px < w; px++) {
                 float lit = 0, unlit = 0;
@@ -798,15 +835,16 @@ struct PanelView::Impl {
         // Lamps: lit from the Master's LED latches. A soft glow, then the lamp, then a highlight.
         uint8_t latches[16];
         engine.leds(latches);
+        const PanelSkin& skin = panel_skins[current_skin()];
         for (const PanelLed& led : panel_leds) {
             if (!(latches[led.latch] >> led.bit & 1)) continue;
             D2D1_POINT_2F c = D2D1::Point2F(led.x * s, led.y * s);
             float r = led.lamp ? 5.6f : 3.1f;  // a key's lamp, or a small indicator beside a label
-            brush->SetColor(D2D1::ColorF(1.f, 0.15f, 0.08f, 0.28f));
+            brush->SetColor(D2D1::ColorF(skin.glow[0], skin.glow[1], skin.glow[2], 0.28f));
             target->FillEllipse(D2D1::Ellipse(c, r * 1.6f * s, r * 1.6f * s), brush);
-            brush->SetColor(D2D1::ColorF(1.f, 0.16f, 0.1f));
+            brush->SetColor(D2D1::ColorF(skin.lamp[0], skin.lamp[1], skin.lamp[2]));
             target->FillEllipse(D2D1::Ellipse(c, r * s, r * s), brush);
-            brush->SetColor(D2D1::ColorF(1.f, 0.75f, 0.6f, 0.85f));
+            brush->SetColor(D2D1::ColorF(skin.shine[0], skin.shine[1], skin.shine[2], 0.85f));
             target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c.x - r * 0.29f * s, c.y - r * 0.32f * s), r * 0.32f * s, r * 0.25f * s), brush);
         }
         brush->SetColor(D2D1::ColorF(0.85f, 0.1f, 0.1f));
@@ -916,6 +954,7 @@ struct PanelView::Impl {
             if (LOWORD(wparam) == factory_command) { self->reset_memory(); return 0; }
             if (LOWORD(wparam) == dump_command) { self->save_dump(); return 0; }
             if (LOWORD(wparam) >= gain_command && LOWORD(wparam) <= gain_command + 24) { write_gain(LOWORD(wparam) - gain_command); return 0; }
+            if (LOWORD(wparam) >= skin_command && LOWORD(wparam) < skin_command + panel_skin_count) { write_skin(LOWORD(wparam) - skin_command); return 0; }
             if (LOWORD(wparam) == shot_command) { if (const char* path = getenv("OB12_PANEL_SHOT")) self->save_image(path); return 0; }
             bool listed = false;
             for (int p : scale_percents) listed |= p == percent;
