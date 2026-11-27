@@ -124,25 +124,36 @@ struct PanelView::Impl {
         std::vector<char> data((std::istreambuf_iterator<char>(f)), {});
         if (data.size() < 16 || memcmp(data.data(), "OB12", 4)) return;
         const char* p = data.data() + 4;
-        auto u32 = [&]() { uint32_t v; memcpy(&v, p, 4); p += 4; return v; };
-        auto f32 = [&]() { float v; memcpy(&v, p, 4); p += 4; return v; };
+        // A short or damaged file is not taken: a read past its end gives 0 and marks it.
+        const char* const end = data.data() + data.size();
+        bool damaged = false;
+        auto left = [&]() { return (size_t)(end - p); };
+        auto u8 = [&]() -> uint8_t { if (left() < 1) { damaged = true; return 0; } return (uint8_t)*p++; };
+        auto u32 = [&]() { uint32_t v = 0; if (left() < 4) damaged = true; else { memcpy(&v, p, 4); p += 4; } return v; };
+        auto f32 = [&]() { float v = 0; if (left() < 4) damaged = true; else { memcpy(&v, p, 4); p += 4; } return v; };
         uint32_t count = u32();
-        art_w = f32();
-        art_h = f32();
-        runs.resize(count);
-        for (auto& r : runs) {
+        float w = f32(), h = f32();
+        // A run takes 13 bytes or more and a command one or more: no count can exceed what is left.
+        if (count > left() / 13 || !(w > 0) || !(h > 0)) return;
+        std::vector<Run> read(count);
+        for (auto& r : read) {
             r.argb = u32();
-            r.mode = (uint8_t)*p++;
+            r.mode = u8();
             r.width = f32();
             uint32_t commands = u32();
+            if (damaged || commands > left()) return;
             r.kinds.reserve(commands);
             for (uint32_t i = 0; i < commands; i++) {
-                uint8_t kind = (uint8_t)*p++;
+                uint8_t kind = u8();
                 r.kinds.push_back(kind);
                 int n = kind == 2 ? 3 : kind == 3 ? 0 : 1;
                 for (int j = 0; j < n * 2; j++) r.points.push_back(f32());
             }
+            if (damaged) return;
         }
+        runs = std::move(read);
+        art_w = w;
+        art_h = h;
         fix_art();
     }
 

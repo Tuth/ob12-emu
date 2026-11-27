@@ -544,15 +544,18 @@ std::string Engine::read_sysex(const std::wstring& path, std::vector<uint8_t>& o
     if (b.empty()) return "cannot read the file";
     out.clear();
     if (b.size() > 14 && !memcmp(b.data(), "MThd", 4)) {  // a Standard MIDI File: its F0 events
-        size_t pos = 8 + (b[4] << 24 | b[5] << 16 | b[6] << 8 | b[7]);
+        // Lengths are unsigned: as an int, one from 0x80000000 up went negative and put pos before the file.
+        auto be32 = [&](size_t p) { return (size_t)((uint32_t)b[p] << 24 | (uint32_t)b[p + 1] << 16 | (uint32_t)b[p + 2] << 8 | (uint32_t)b[p + 3]); };
+        size_t pos = 8 + be32(4);
         auto vlq = [&](size_t& p) { uint32_t v = 0; while (p < b.size()) { uint8_t c = b[p++]; v = v << 7 | (c & 0x7f); if (!(c & 0x80)) break; } return v; };
         while (pos + 8 <= b.size()) {
-            size_t end = pos + 8 + (b[pos + 4] << 24 | b[pos + 5] << 16 | b[pos + 6] << 8 | b[pos + 7]);
+            size_t end = pos + 8 + be32(pos + 4);
             bool track = !memcmp(&b[pos], "MTrk", 4);
             pos += 8;
             uint8_t running = 0;
             while (track && pos < end && pos < b.size()) {
                 vlq(pos);
+                if (pos >= b.size()) break;  // the file ends inside a delta time
                 uint8_t status = b[pos];
                 if (status == 0xff) { pos += 2; uint32_t n = vlq(pos); pos += n; continue; }
                 if (status == 0xf0 || status == 0xf7) {
