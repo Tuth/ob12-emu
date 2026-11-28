@@ -18,6 +18,7 @@
 #include "pluginterfaces/vst/vsttypes.h"
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -107,10 +108,27 @@ struct Instrument {
         }
         feeder = std::thread([this]() {
             std::vector<int32_t> block(240 * 2);
+            // A host that stops asking for audio (transport stopped, no device, a frozen track) would
+            // leave the ring full and the machine standing: keys, the display and MIDI dead. After
+            // 200 ms without a read the machine goes on at its own pace, 240 frames every 5 ms, and
+            // that sound is dropped; the first read brings the ring back.
+            using clock = std::chrono::steady_clock;
+            uint32_t read_seen = 0;
+            clock::time_point read_at = clock::now();
             while (!stop) {
-                uint32_t fill = written.load(std::memory_order_relaxed) - read.load(std::memory_order_acquire);
+                uint32_t taken = read.load(std::memory_order_acquire);
+                uint32_t fill = written.load(std::memory_order_relaxed) - taken;
                 bool ready = engine->sounding_ready();
-                if (ready && fill >= (uint32_t)lead_frames) { Sleep(1); continue; }
+                if (ready && fill >= (uint32_t)lead_frames) {
+                    clock::time_point now = clock::now();
+                    if (taken != read_seen) { read_seen = taken; read_at = now; }
+                    if (now - read_at < std::chrono::milliseconds(200)) { Sleep(1); continue; }
+                    engine->run(block.data(), 240);
+                    while (!stop && clock::now() - now < std::chrono::milliseconds(5)) Sleep(1);
+                    continue;
+                }
+                read_seen = taken;
+                read_at = clock::now();
                 engine->run(block.data(), 240);
                 if (!ready) continue;
                 uint32_t w = written.load(std::memory_order_relaxed);
