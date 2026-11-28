@@ -864,7 +864,7 @@ struct PanelView::Impl {
         }
         if (down_key >= 0) {
             const PanelKey& k = panel_keys[down_key];
-            brush->SetColor(D2D1::ColorF(0.85f, 0.1f, 0.1f, 0.45f));
+            brush->SetColor(D2D1::ColorF(skin.lamp[0], skin.lamp[1], skin.lamp[2], 0.45f));  // in the lamps' colour
             target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(k.x * s, k.y * s), 21 * s, 12 * s), brush);
         }
         target->SetTransform(D2D1::Matrix3x2F::Identity());
